@@ -307,28 +307,20 @@ class DecoderModel(nn.Module):
         return loss, lm_logits
 
     # NOTE only works with batch size 1
-    def generate_from_1(self, args, decoder_input_ids, topk_documents_decoder_input_ids):
+    def generate_from_1_doc(self, args, decoder_input_ids, best_document_decoder_input_ids):
         special_tokens_ids = self.tokenizer.convert_tokens_to_ids(
             self.SPECIAL_TOKENS_VALUES)
         current_output = []
 
-        # select top document
-        topk_documents_decoder_input_ids = [
-            [topk_documents_decoder_input_ids[0][0]]]
-
         for i in range(args.generation_args["max_length"]):
             decoder_input_ids_, _, decoder_token_type_ids_ = self._prepare_inputs(
-                decoder_input_ids, [current_output], topk_documents_decoder_input_ids, with_eos=False)
+                [decoder_input_ids], [current_output], [[best_document_decoder_input_ids]], with_eos=False)
 
             decoder_input_ids_ = decoder_input_ids_.cuda()
             decoder_token_type_ids_ = decoder_token_type_ids_.cuda()
 
-            batch_size, topk, sequence_length = decoder_input_ids_.shape
-
-            decoder_input_ids_ = decoder_input_ids_.reshape(
-                batch_size * topk, -1)
-            decoder_token_type_ids_ = decoder_token_type_ids_.reshape(
-                batch_size * topk, -1)
+            decoder_input_ids_ = decoder_input_ids_.reshape(1, -1)
+            decoder_token_type_ids_ = decoder_token_type_ids_.reshape(1, -1)
 
             decoder_model_outputs = self.decoder(
                 input_ids=decoder_input_ids_, token_type_ids=decoder_token_type_ids_)
@@ -438,7 +430,7 @@ class UnsupervisedModel(nn.Module):
 
             print("loss =", loss)
             print("prior_dist =", prior_dist)
-            print("topk_document_ids =", topk_documents_ids)
+            print("topk_documents_ids =", topk_documents_ids)
             print("doc_ids =", doc_ids)
             print("q_ids =", q_ids)
             print()

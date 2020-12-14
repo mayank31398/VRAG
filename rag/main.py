@@ -47,24 +47,21 @@ def Train(args, train_dataset, eval_dataset, model):
 
     model.zero_grad()
     global_step = 0
-    best_acc = 0
-    num_times_best_acc = 0
-    best_found = False
+    # best_acc = 0
+    # num_times_best_acc = 0
+    # best_found = False
 
     for _ in trange(int(args.num_train_epochs), desc="Epoch"):
+        model.train()
         local_steps = 0
         tr_loss = 0
         epoch_iterator = tqdm(train_dataloader, desc="Iteration")
 
         for step, batch in enumerate(epoch_iterator):
             global_step += 1
-            model.train()
 
             loss, _, _, _, _, _ = model(batch)
-
-            if (args.gradient_accumulation_steps > 1):
-                loss = loss / args.gradient_accumulation_steps
-
+            loss = loss / args.gradient_accumulation_steps
             loss.backward()
             tr_loss += loss.item()
 
@@ -108,7 +105,7 @@ def Evaluate(args, eval_dataset, model):
     eval_dataloader = DataLoader(
         eval_dataset,
         sampler=eval_sampler,
-        batch_size=args.batch_size,
+        batch_size=1,
         collate_fn=eval_dataset.collate_fn
     )
 
@@ -124,31 +121,44 @@ def Evaluate(args, eval_dataset, model):
             prior_dist, topk_documents_decoder_input_ids, topk_documents_ids = model.prior_model(
                 prior_input_ids)
 
-            for prior_dist_, topk_documents_ids_, doc_ids_, q_ids_ in zip(prior_dist, topk_documents_ids, doc_ids, q_ids):
-                reciprocal_rank, recall_1, recall_k = selection_metrics.update(
-                    topk_documents_ids_, doc_ids_)
+            # sequence_length
+            decoder_input_ids = decoder_input_ids[0]
+            # topk
+            prior_dist = prior_dist.detach().cpu().numpy().tolist()[0]
+            # topk
+            topk_documents_ids = topk_documents_ids[0]
+            # 1
+            doc_ids = doc_ids[0]
+            # 1
+            q_ids = q_ids[0]
+            # topk x sequence_length
+            topk_documents_decoder_input_ids = topk_documents_decoder_input_ids[0]
+            # sequence_length
+            best_document_decoder_input_ids = topk_documents_decoder_input_ids[0]
 
-                # NOTE if args.eval_only is true batch size should be 1
-                if (args.eval_only):
-                    # output_text = model.decoder_model.generate_from_1(
-                    #     args, decoder_input_ids, topk_documents_decoder_input_ids)
+            reciprocal_rank, recall_1, recall_k = selection_metrics.update(
+                topk_documents_ids, doc_ids)
 
-                    d[q_ids_] = {
-                        "prior_dist": prior_dist_.detach().cpu().numpy().tolist(),
-                        "topk_document_ids": topk_documents_ids_,
-                        # "generated_response_from_1": output_text,
-                        # "selection_scores": {
-                        #     "rr": reciprocal_rank,
-                        #     "r@1": recall_1,
-                        #     "r@" + str(selection_metrics.topk): recall_k
-                        # }
-                    }
+            # NOTE if args.eval_only is true batch size should be 1
+            if (args.eval_only):
+                # output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
+                #     args, decoder_input_ids, best_document_decoder_input_ids)
+
+                d[q_ids] = {
+                    "prior_dist": prior_dist,
+                    "topk_documents_ids": topk_documents_ids,
+                    # "generated_response_from_1_doc": output_text_from_1_doc,
+                    # "selection_scores": {
+                    #     "rr": reciprocal_rank,
+                    #     "r@1": recall_1,
+                    #     "r@" + str(selection_metrics.topk): recall_k
+                    # }
+                }
 
     if (args.eval_only):
         write_preds(eval_dataset, args.output_file, d)
 
     results = selection_metrics.scores()
-
     return results
 
 
@@ -223,7 +233,6 @@ def main():
         Train(args, unsupervised_train_dataset,
               unsupervised_eval_dataset, unsupervised_model)
     else:
-        args.batch_size = 1
         unsupervised_eval_dataset = UnsupervisedDataset(
             args, tokenizers, labels_file=args.labels_file)
         results = Evaluate(args, unsupervised_eval_dataset, unsupervised_model)

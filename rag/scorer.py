@@ -83,7 +83,7 @@ def main():
 
     selection_metrics = SelectionMetrics()
     for example in predictions:
-        selection_metrics.update(example["topk_document_ids"], example["doc_id"])
+        selection_metrics.update(example["topk_documents_ids"], example["doc_id"])
     results = selection_metrics.scores()
 
     # Setup logging
