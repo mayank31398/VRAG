@@ -8,7 +8,9 @@ from argparse import Namespace
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from torchviz import make_dot
 from tqdm import tqdm, trange
 from transformers import AdamW, get_linear_schedule_with_warmup
 
@@ -47,9 +49,9 @@ def Train(args, train_dataset, eval_dataset, model):
 
     model.zero_grad()
     global_step = 0
-    # best_acc = 0
-    # num_times_best_acc = 0
-    # best_found = False
+    best_acc = 0
+    num_times_best_acc = 0
+    best_found = False
 
     for _ in trange(int(args.num_train_epochs), desc="Epoch"):
         model.train()
@@ -60,20 +62,20 @@ def Train(args, train_dataset, eval_dataset, model):
         for step, batch in enumerate(epoch_iterator):
             global_step += 1
 
-            loss, _, _, _, _, _ = model(batch)
+            # with torch.autograd.detect_anomaly():
+            loss = model(batch)
             loss = loss / args.gradient_accumulation_steps
             loss.backward()
             tr_loss += loss.item()
 
             if ((step + 1) % args.gradient_accumulation_steps == 0):
                 torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), args.max_grad_norm)
+                    model.GetParameters(), args.max_grad_norm)
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
-                global_step += 1
                 local_steps += 1
-                epoch_iterator.set_postfix(Loss=tr_loss/(local_steps+1))
+                epoch_iterator.set_postfix(Loss=tr_loss / (local_steps + 1))
 
         results = Evaluate(args, eval_dataset, model)
 
@@ -81,23 +83,21 @@ def Train(args, train_dataset, eval_dataset, model):
         for key in sorted(results.keys()):
             logger.info("  %s = %s", key, str(results[key]))
 
-        # if (results["accuracy"] > best_acc):
-        #     num_times_best_acc = 0
-        #     best_model = copy.deepcopy(model)
-        #     best_acc = results["accuracy"]
-        # else:
-        #     num_times_best_acc += 1
-        #     if (num_times_best_acc == args.stopping_criteria):
-        #         best_found = True
-        #         best_model.save_model(args, "best")
-        #         break
+        if (results["r@1"] > best_acc):
+            num_times_best_acc = 0
+            model.save_model(args, "best")
+            best_acc = results["r@1"]
+            best_found = True
+        else:
+            num_times_best_acc += 1
+            if (num_times_best_acc == args.stopping_criteria):
+                break
 
         model.save_model(args, "checkpoint-" + str(global_step))
 
     model.save_model(args, "")
-
-    # if (not best_found):
-    #     model.save_model(args, "best")
+    if (not best_found):
+        model.save_model(args, "best")
 
 
 def Evaluate(args, eval_dataset, model):
@@ -118,8 +118,9 @@ def Evaluate(args, eval_dataset, model):
 
         for batch in epoch_iterator:
             prior_input_ids, _, _, decoder_input_ids, decoder_response_ids, doc_ids, q_ids = batch
-            prior_dist, topk_documents_decoder_input_ids, topk_documents_ids = model.prior_model(
+            prior_logits, topk_documents_decoder_input_ids, topk_documents_ids = model.prior_model(
                 prior_input_ids)
+            prior_dist = F.softmax(prior_logits, dim=-1)
 
             # sequence_length
             decoder_input_ids = decoder_input_ids[0]
@@ -195,7 +196,7 @@ def main():
     # load args from params file and update the args Namespace
     if (args.eval_only and args.params_file == None):
         args.params_file = os.path.join(
-            args.model_path, "prior", "params.json")
+            args.model_path, "prior", args.checkpoint, "params.json")
     logger.info("using params from " + args.params_file)
 
     with open(args.params_file, "r") as f:
