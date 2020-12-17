@@ -18,6 +18,42 @@ DIVIDE = 5
 logger = logging.getLogger(__name__)
 
 
+def GetUnionLogits(prior_model_outputs, posterior_model_outputs):
+    prior_topk_documents_ids = prior_model_outputs["topk_documents_ids"]
+    posterior_topk_documents_ids = posterior_model_outputs["topk_documents_ids"]
+    prior_question_embeddings = prior_model_outputs["question_embeddings"]
+    posterior_question_embeddings = posterior_model_outputs["question_embeddings"]
+    prior_topk_documents_embeddings = prior_model_outputs["topk_documents_embeddings"]
+    posterior_topk_documents_embeddings = posterior_model_outputs["topk_documents_embeddings"]
+
+    prior_dist_full = []
+    posterior_dist_full = []
+
+    batch_size = len(prior_topk_documents_ids)
+    topk = len(prior_topk_documents_ids[0])
+
+    all_docs_embeds = []
+    for i in range(batch_size):
+        s = set()
+        for j in range(topk):
+            s.add(prior_topk_documents_ids[i][j])
+            s.add(posterior_topk_documents_ids[i][j])
+        for j in s:
+            if (j in prior_topk_documents_ids[i]):
+                k = prior_topk_documents_ids[i].index(j)
+                all_docs_embeds.append(prior_topk_documents_embeddings[i][k])
+            else:
+                k = posterior_topk_documents_ids[i].index(j)
+                all_docs_embeds.append(
+                    posterior_topk_documents_embeddings[i][k])
+
+    all_docs_embeds = torch.tensor(all_docs_embeds).T.cuda()
+    prior_logits_full = prior_question_embeddings @ all_docs_embeds
+    posterior_logits_full = posterior_question_embeddings @ all_docs_embeds
+
+    return prior_logits_full, posterior_logits_full
+
+
 class PriorModel(nn.Module):
     def __init__(self, args, indexed_passages):
         super(PriorModel, self).__init__()
@@ -52,7 +88,7 @@ class PriorModel(nn.Module):
             'embeddings', question_embeddings, k=self.topk)
         return retrievals
 
-    def forward(self, batch, return_question_embeddings=False):
+    def forward(self, batch):
         # batch_size x sequence_length
         input_ids = batch
         input_ids = input_ids.cuda()
@@ -76,10 +112,17 @@ class PriorModel(nn.Module):
         topk_documents_decoder_input_ids = [
             i["decoder_input_ids"] for i in retrievals.total_examples]
         topk_documents_ids = [i["id"] for i in retrievals.total_examples]
+        topk_documents_embeddings = [i["embeddings"]
+                                     for i in retrievals.total_examples]
 
-        if (return_question_embeddings):
-            return logits, topk_documents_decoder_input_ids, topk_documents_ids, question_embeddings
-        return logits, topk_documents_decoder_input_ids, topk_documents_ids
+        d = {
+            "logits": logits,
+            "topk_documents_decoder_input_ids": topk_documents_decoder_input_ids,
+            "topk_documents_ids": topk_documents_ids,
+            "question_embeddings": question_embeddings,
+            "topk_documents_embeddings": topk_documents_embeddings
+        }
+        return d
 
     def save_model(self, args, model_name):
         output_dir = os.path.join(args.model_path, "prior", model_name)
@@ -129,7 +172,7 @@ class PosteriorModel(nn.Module):
             'embeddings', question_embeddings, k=self.topk)
         return retrievals
 
-    def forward(self, batch, return_question_embeddings=False):
+    def forward(self, batch):
         input_ids, token_type_ids = batch
 
         # batch_size x sequence_length
@@ -155,10 +198,17 @@ class PosteriorModel(nn.Module):
         topk_documents_decoder_input_ids = [
             i["decoder_input_ids"] for i in retrievals.total_examples]
         topk_documents_ids = [i["id"] for i in retrievals.total_examples]
+        topk_documents_embeddings = [i["embeddings"]
+                                     for i in retrievals.total_examples]
 
-        if (return_question_embeddings):
-            return logits, topk_documents_decoder_input_ids, topk_documents_ids, question_embeddings
-        return logits, topk_documents_decoder_input_ids, topk_documents_ids
+        d = {
+            "logits": logits,
+            "topk_documents_decoder_input_ids": topk_documents_decoder_input_ids,
+            "topk_documents_ids": topk_documents_ids,
+            "question_embeddings": question_embeddings,
+            "topk_documents_embeddings": topk_documents_embeddings
+        }
+        return d
 
     def save_model(self, args, model_name):
         output_dir = os.path.join(args.model_path, "posterior", model_name)
@@ -369,7 +419,7 @@ class UnsupervisedModel(nn.Module):
         super(UnsupervisedModel, self).__init__()
 
         self.modeling_method = args.modeling_method
-        if (self.modeling_method == "VRAG"):
+        if (self.modeling_method == "VRAG" or self.modeling_method == "VRAG_union"):
             self.kl_beta = args.kl_beta
 
         self.prior_model = PriorModel(args, indexed_passages)
@@ -386,13 +436,12 @@ class UnsupervisedModel(nn.Module):
          q_ids) = batch
 
         if (self.modeling_method == "RAG"):
-            prior_logits, topk_documents_decoder_input_ids, topk_documents_ids = self.prior_model(
-                prior_input_ids)
-            prior_dist = F.softmax(prior_logits, dim=-1)
+            prior_model_outputs = self.prior_model(prior_input_ids)
+            prior_dist = F.softmax(prior_model_outputs["logits"], dim=-1)
 
             # batch_size x topk x sequence_length
             decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
-                decoder_input_ids, decoder_response_ids, topk_documents_decoder_input_ids)
+                decoder_input_ids, decoder_response_ids, prior_model_outputs["topk_documents_decoder_input_ids"])
 
             # batch_size x topk
             # batch_size x topk x sequence_length x vocab_size
@@ -412,21 +461,22 @@ class UnsupervisedModel(nn.Module):
 
             print("loss =", loss)
             print("prior_dist =", prior_dist)
-            print("topk_documents_ids =", topk_documents_ids)
+            print("topk_documents_ids =",
+                  prior_model_outputs["topk_documents_ids"])
             print("doc_ids =", doc_ids)
             print("q_ids =", q_ids)
             print()
 
-            # return loss, prior_dist, decoder_output_logits, topk_documents_ids, doc_ids, q_ids
             return loss
         elif (self.modeling_method == "VRAG"):
-            posterior_logits, topk_documents_decoder_input_ids, topk_documents_ids, posterior_question_embeddings = self.posterior_model(
-                [posterior_input_ids, posterior_token_type_ids], return_question_embeddings=True)
-            posterior_dist = F.softmax(posterior_logits, dim=-1)
+            posterior_model_outputs = self.posterior_model(
+                [posterior_input_ids, posterior_token_type_ids])
+            posterior_dist = F.softmax(
+                posterior_model_outputs["logits"], dim=-1)
 
             # batch_size x topk x sequence_length
             decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
-                decoder_input_ids, decoder_response_ids, topk_documents_decoder_input_ids)
+                decoder_input_ids, decoder_response_ids, posterior_model_outputs["topk_documents_decoder_input_ids"])
 
             # batch_size x topk
             # batch_size x topk x sequence_length x vocab_size
@@ -446,7 +496,7 @@ class UnsupervisedModel(nn.Module):
                 self.prior_model.indexed_passages['embeddings']).T.cuda()
 
             # batch_size x index_size
-            posterior_logits_full = posterior_question_embeddings @ all_doc_embeds
+            posterior_logits_full = posterior_model_outputs["question_embeddings"] @ all_doc_embeds
             posterior_dist_full = F.softmax(posterior_logits_full, dim=-1)
 
             prior_question_embeddings = self.prior_model.encoder(
@@ -465,12 +515,60 @@ class UnsupervisedModel(nn.Module):
             print("loss =", loss)
             print("KL =", KL)
             print("posterior_dist =", posterior_dist)
-            print("topk_documents_ids =", topk_documents_ids)
+            print("topk_documents_ids =",
+                  posterior_model_outputs["topk_documents_ids"])
             print("doc_ids =", doc_ids)
             print("q_ids =", q_ids)
             print()
 
-            # return loss, posterior_dist, decoder_output_logits, topk_documents_ids, doc_ids, q_ids
+            return loss
+        elif (self.modeling_method == "VRAG_union"):
+            posterior_model_outputs = self.posterior_model(
+                [posterior_input_ids, posterior_token_type_ids])
+            posterior_dist = F.softmax(
+                posterior_model_outputs["logits"], dim=-1)
+
+            # batch_size x topk x sequence_length
+            decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
+                decoder_input_ids, decoder_response_ids, posterior_model_outputs["topk_documents_decoder_input_ids"])
+
+            # batch_size x topk
+            # batch_size x topk x sequence_length x vocab_size
+            decoder_loss, decoder_output_logits = self.decoder_model(
+                [decoder_input_ids, decoder_response_ids])
+
+            # batch_size x topk
+            decoder_likelihood = torch.exp(-decoder_loss)
+
+            # batch_size x 1
+            p_y_given_x = (posterior_dist * decoder_likelihood).sum(dim=-1)
+            # 1
+            loss = (-torch.log(p_y_given_x)).mean()
+
+            prior_model_outputs = self.prior_model(prior_input_ids)
+
+            prior_logits_full, posterior_logits_full = GetUnionLogits(
+                prior_model_outputs, posterior_model_outputs)
+
+            prior_log_dist_full = F.log_softmax(prior_logits_full, dim=-1)
+            posterior_dist_full = F.softmax(posterior_logits_full, dim=-1)
+
+            KL = F.kl_div(prior_log_dist_full,
+                          posterior_dist_full, reduction='batchmean')
+            loss += self.kl_beta * KL
+
+            # make_dot(loss).render("VRAG_union", format="svg")
+            # exit()
+
+            print("loss =", loss)
+            print("KL =", KL)
+            print("posterior_dist =", posterior_dist)
+            print("topk_documents_ids =",
+                  posterior_model_outputs["topk_documents_ids"])
+            print("doc_ids =", doc_ids)
+            print("q_ids =", q_ids)
+            print()
+
             return loss
 
     def save_model(self, args, model_name):
@@ -481,6 +579,6 @@ class UnsupervisedModel(nn.Module):
     def GetParameters(self):
         params = list(self.prior_model.parameters()) + \
             list(self.decoder_model.parameters())
-        if (self.modeling_method == "VRAG"):
+        if (self.modeling_method == "VRAG" or self.modeling_method == "VRAG_union"):
             params += list(self.posterior_model.parameters())
         return params

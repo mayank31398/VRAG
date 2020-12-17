@@ -2,7 +2,7 @@
     "document_encoder_model_name": "facebook/dpr-ctx_encoder-multiset-base",
     "question_encoder_model_name": "facebook/dpr-question_encoder-multiset-base",
     "decoder_model_name": "gpt2",
-    "modeling_method": "RAG",
+    "modeling_method": "VRAG_union",
     "gradient_accumulation_steps": 1,
     "learning_rate": 1e-5,
     "adam_epsilon": 1e-8,
@@ -13,6 +13,7 @@
     "batch_size": 1,
     "warmup_steps": 0,
     "stopping_criteria": 5,
+    "kl_beta": 1,
     "processing_args": {
         "batch_size": 8
     },

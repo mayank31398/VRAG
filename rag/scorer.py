@@ -1,8 +1,9 @@
 import argparse
 import json
+import logging
 import re
 import sys
-import logging
+
 import numpy as np
 from nltk.translate.bleu_score import sentence_bleu
 from nltk.translate.meteor_score import single_meteor_score
@@ -73,7 +74,86 @@ class SelectionMetrics:
         return scores
 
 
+class GenerationMetrics:
+    def __init__(self, topk=None):
+        self.reset()
+
+    def reset(self):
+        self._count = 0
+        self._bleu1 = 0
+        self._bleu2 = 0
+        self._bleu3 = 0
+        self._bleu4 = 0
+
+    def _normalize_text(self, text):
+        result = text.lower()
+        result = RE_PUNC.sub(' ', result)
+        result = RE_ART.sub(' ', result)
+        result = ' '.join(result.split())
+
+        return result
+
+    def _bleu(self, ref_response, hyp_response, n=4):
+        ref_tokens = self._normalize_text(ref_response).split()
+        hyp_tokens = self._normalize_text(hyp_response).split()
+
+        if (ref_tokens == ['cannotanswer']):
+            if (hyp_tokens == ['cannotanswer']):
+                return 1
+            else:
+                return 0
+        else:
+            if (hyp_tokens == ['cannotanswer']):
+                return 0
+            else:
+                if (len(hyp_tokens) == 0):
+                    return 0
+
+                weights = [1 / n] * n
+                score = sentence_bleu([ref_tokens], hyp_tokens, weights)
+
+                return score
+
+    def update(self, ref_response, hyp_response):
+        bleu1 = self._bleu(ref_response, hyp_response, n=1)
+        bleu2 = self._bleu(ref_response, hyp_response, n=2)
+        bleu3 = self._bleu(ref_response, hyp_response, n=3)
+        bleu4 = self._bleu(ref_response, hyp_response, n=4)
+
+        self._bleu1 += bleu1
+        self._bleu2 += bleu2
+        self._bleu3 += bleu3
+        self._bleu4 += bleu4
+        self._count += 1
+
+        return bleu1, bleu2, bleu3, bleu4
+
+    def _compute(self, score_sum):
+        return score_sum / self._count
+
+    def scores(self):
+        bleu1 = self._compute(self._bleu1)
+        bleu2 = self._compute(self._bleu2)
+        bleu3 = self._compute(self._bleu3)
+        bleu4 = self._compute(self._bleu4)
+
+        scores = {
+            "bleu-1": bleu1,
+            "bleu-2": bleu2,
+            "bleu-3": bleu3,
+            "bleu-4": bleu4
+        }
+        return scores
+
+
 def main():
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d : %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO
+    )
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--output_file", type=str)
@@ -83,17 +163,22 @@ def main():
 
     selection_metrics = SelectionMetrics()
     for example in predictions:
-        selection_metrics.update(example["topk_documents_ids"], example["doc_id"])
+        selection_metrics.update(
+            example["topk_documents_ids"], example["doc_id"])
     results = selection_metrics.scores()
 
-    # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d : %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO
-    )
+    logger.info("***** Selection results *****")
+    for key in sorted(results.keys()):
+        logger.info("  %s = %s", key, str(results[key]))
 
-    logger.info("***** Eval results *****")
+    generation_metrics = GenerationMetrics()
+    for example in predictions:
+        if (example["doc_id"] != None):
+            generation_metrics.update(
+                example["response"], example["generated_response_from_1_doc"])
+    results = generation_metrics.scores()
+
+    logger.info("***** Generation results *****")
     for key in sorted(results.keys()):
         logger.info("  %s = %s", key, str(results[key]))
 

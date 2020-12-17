@@ -118,22 +118,22 @@ def Evaluate(args, eval_dataset, model):
 
         for batch in epoch_iterator:
             prior_input_ids, _, _, decoder_input_ids, decoder_response_ids, doc_ids, q_ids = batch
-            prior_logits, topk_documents_decoder_input_ids, topk_documents_ids = model.prior_model(
-                prior_input_ids)
-            prior_dist = F.softmax(prior_logits, dim=-1)
+            prior_model_outputs = model.prior_model(prior_input_ids)
+            prior_dist = F.softmax(prior_model_outputs["logits"], dim=-1)
 
             # sequence_length
             decoder_input_ids = decoder_input_ids[0]
             # topk
             prior_dist = prior_dist.detach().cpu().numpy().tolist()[0]
             # topk
-            topk_documents_ids = topk_documents_ids[0]
+            topk_documents_ids = prior_model_outputs["topk_documents_ids"][0]
             # 1
             doc_ids = doc_ids[0]
             # 1
             q_ids = q_ids[0]
             # topk x sequence_length
-            topk_documents_decoder_input_ids = topk_documents_decoder_input_ids[0]
+            topk_documents_decoder_input_ids = prior_model_outputs[
+                "topk_documents_decoder_input_ids"][0]
             # sequence_length
             best_document_decoder_input_ids = topk_documents_decoder_input_ids[0]
 
@@ -142,13 +142,13 @@ def Evaluate(args, eval_dataset, model):
 
             # NOTE if args.eval_only is true batch size should be 1
             if (args.eval_only):
-                # output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
-                #     args, decoder_input_ids, best_document_decoder_input_ids)
+                output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
+                    args, decoder_input_ids, best_document_decoder_input_ids)
 
                 d[q_ids] = {
                     "prior_dist": prior_dist,
                     "topk_documents_ids": topk_documents_ids,
-                    # "generated_response_from_1_doc": output_text_from_1_doc,
+                    "generated_response_from_1_doc": output_text_from_1_doc,
                     # "selection_scores": {
                     #     "rr": reciprocal_rank,
                     #     "r@1": recall_1,
@@ -183,7 +183,7 @@ def main():
     parser.add_argument("--output_file", type=str, default="",
                         help="Predictions will be written to this file.")
     parser.add_argument("--model_path", type=str,
-                        help="Name of the experiment, checkpoints will be stored in runs/{exp_name}")
+                        help="Name of the experiment, checkpoints will be stored here")
     args = parser.parse_args()
 
     # Setup logging
