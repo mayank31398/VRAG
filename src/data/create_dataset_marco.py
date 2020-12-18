@@ -15,22 +15,23 @@ def CreateDataset(dataset, docs={}, qid=0):
     for key in dataset["query"]:
         evidences = dataset["passages"][key]
         question = dataset["query"][key]
+        answer = dataset["answers"][key][0]
+        correct_doc_id = None
 
-        if ("answers" in dataset):
-            answer = dataset["answers"][key][0]
-            if (answer.lower() == "no answer present."):
-                answer = "CANNOTANSWER"
-        else:
-            answer = None
+        if (answer.lower() == "no answer present."):
+            continue
 
         for evidence in evidences:
             if (evidence["passage_text"] not in docs):
                 docs[evidence["passage_text"]] = doc_id
                 doc_id += 1
 
+                if (evidence["is_selected"] == 1):
+                    correct_doc_id = doc_id
+
         d = {
             "qid": qid,
-            "doc_id": None,
+            "doc_id": correct_doc_id,
             "query": question,
             "response": answer
         }
@@ -55,15 +56,15 @@ def CreateKnowledge(docs):
 
 
 def main():
-    with open("data_marco/train.json", "r") as f:
+    with open("data_marco/augmented/train.json", "r") as f:
         train = json.load(f)
     train, docs = CreateDataset(train)
 
-    with open("data_marco/val.json", "r") as f:
+    with open("data_marco/augmented/val.json", "r") as f:
         val = json.load(f)
     val, docs = CreateDataset(val, docs=docs)
 
-    with open("data_marco/test.json", "r") as f:
+    with open("data_marco/augmented/test.json", "r") as f:
         test = json.load(f)
     test, docs = CreateDataset(test, docs=docs)
 

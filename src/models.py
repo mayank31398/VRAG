@@ -18,7 +18,7 @@ DIVIDE = 5
 logger = logging.getLogger(__name__)
 
 
-def GetUnionLogits(prior_model_outputs, posterior_model_outputs):
+def GetUnionKL(prior_model_outputs, posterior_model_outputs):
     prior_topk_documents_ids = prior_model_outputs["topk_documents_ids"]
     posterior_topk_documents_ids = posterior_model_outputs["topk_documents_ids"]
     prior_question_embeddings = prior_model_outputs["question_embeddings"]
@@ -32,8 +32,9 @@ def GetUnionLogits(prior_model_outputs, posterior_model_outputs):
     batch_size = len(prior_topk_documents_ids)
     topk = len(prior_topk_documents_ids[0])
 
-    all_docs_embeds = []
+    KL = 0
     for i in range(batch_size):
+        all_docs_embeds = []
         s = set()
         for j in range(topk):
             s.add(prior_topk_documents_ids[i][j])
@@ -47,11 +48,16 @@ def GetUnionLogits(prior_model_outputs, posterior_model_outputs):
                 all_docs_embeds.append(
                     posterior_topk_documents_embeddings[i][k])
 
-    all_docs_embeds = torch.tensor(all_docs_embeds).T.cuda()
-    prior_logits_full = prior_question_embeddings @ all_docs_embeds
-    posterior_logits_full = posterior_question_embeddings @ all_docs_embeds
+        all_docs_embeds = torch.tensor(all_docs_embeds).T.cuda()
+        prior_logits_full = prior_question_embeddings @ all_docs_embeds
+        posterior_logits_full = posterior_question_embeddings @ all_docs_embeds
 
-    return prior_logits_full, posterior_logits_full
+        prior_log_dist_full = F.log_softmax(prior_logits_full, dim=-1)
+        posterior_dist_full = F.softmax(posterior_logits_full, dim=-1)
+
+        KL += F.kl_div(prior_log_dist_full, posterior_dist_full)
+    KL /= batch_size
+    return KL
 
 
 class PriorModel(nn.Module):
@@ -59,6 +65,7 @@ class PriorModel(nn.Module):
         super(PriorModel, self).__init__()
 
         self.topk = args.topk
+        self.max_length = 512
 
         if (args.eval_only and args.model_path != None):
             self.config = AutoConfig.from_pretrained(
@@ -95,7 +102,7 @@ class PriorModel(nn.Module):
 
         # batch_size x 768
         question_embeddings = self.encoder(
-            input_ids=input_ids).pooler_output
+            input_ids=input_ids[:, :self.max_length]).pooler_output
         retrievals = self.retrieve(question_embeddings)
 
         logits = []
@@ -143,6 +150,7 @@ class PosteriorModel(nn.Module):
         super(PosteriorModel, self).__init__()
 
         self.topk = args.topk
+        self.max_length = 512
 
         if (args.eval_only and args.model_path != None):
             self.config = AutoConfig.from_pretrained(
@@ -181,7 +189,7 @@ class PosteriorModel(nn.Module):
 
         # batch_size x 768
         question_embeddings = self.encoder(
-            input_ids=input_ids, token_type_ids=token_type_ids).pooler_output
+            input_ids=input_ids[:, :self.max_length], token_type_ids=token_type_ids[:, :self.max_length]).pooler_output
         retrievals = self.retrieve(question_embeddings)
 
         logits = []
@@ -236,6 +244,7 @@ class DecoderModel(nn.Module):
         }
         self.SPECIAL_TOKENS_VALUES = [
             "<bos>", "<eos>", "<pad>", "<speaker1>", "<speaker2>"]
+        self.max_length = 1024
 
         if (args.eval_only and args.model_path != None):
             self.config = AutoConfig.from_pretrained(
@@ -300,6 +309,10 @@ class DecoderModel(nn.Module):
         list_lms = torch.tensor(pad_ids(list_lms, -100))
         list_type_ids = torch.tensor(pad_ids(list_type_ids, self.pad))
 
+        list_ids = list_ids[:, :self.max_length]
+        list_lms = list_lms[:, :self.max_length]
+        list_type_ids = list_type_ids[:, :self.max_length]
+
         decoder_input_ids = list_ids.reshape(batch_size, topk, -1)
         decoder_response_ids = list_lms.reshape(batch_size, topk, -1)
         decoder_token_type_ids = list_type_ids.reshape(batch_size, topk, -1)
@@ -336,13 +349,10 @@ class DecoderModel(nn.Module):
         decoder_response_ids = decoder_response_ids.cuda()
 
         batch_size, topk, sequence_length = decoder_input_ids.shape
-
-        decoder_input_ids_ = decoder_input_ids.reshape(batch_size * topk, -1)
-        decoder_response_ids_ = decoder_response_ids.reshape(
-            batch_size * topk, -1)
+        decoder_input_ids = decoder_input_ids.reshape(batch_size * topk, -1)
 
         decoder_model_outputs = self.decoder(
-            input_ids=decoder_input_ids_, token_type_ids=None)
+            input_ids=decoder_input_ids, token_type_ids=None)
 
         lm_logits = decoder_model_outputs[0]
         lm_logits = lm_logits.reshape(batch_size, topk, sequence_length, -1)
@@ -484,20 +494,13 @@ class UnsupervisedModel(nn.Module):
                 [decoder_input_ids, decoder_response_ids])
 
             # batch_size x 1
-            p_y_given_x = (posterior_dist * decoder_loss).sum(dim=-1)
+            e = (posterior_dist * decoder_loss).sum(dim=-1)
             # 1
-            loss = p_y_given_x.mean()
+            loss = e.mean()
 
             prior_model_outputs = self.prior_model(prior_input_ids)
+            KL = GetUnionKL(prior_model_outputs, posterior_model_outputs)
 
-            prior_logits_full, posterior_logits_full = GetUnionLogits(
-                prior_model_outputs, posterior_model_outputs)
-
-            prior_log_dist_full = F.log_softmax(prior_logits_full, dim=-1)
-            posterior_dist_full = F.softmax(posterior_logits_full, dim=-1)
-
-            KL = F.kl_div(prior_log_dist_full,
-                          posterior_dist_full, reduction='batchmean')
             loss += self.kl_beta * KL
 
             # make_dot(loss).render("VRAG", format="svg")
