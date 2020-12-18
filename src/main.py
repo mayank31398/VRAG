@@ -123,7 +123,7 @@ def Evaluate(args, eval_dataset, model):
         model.eval()
 
         for batch in epoch_iterator:
-            prior_input_ids, _, _, decoder_input_ids, decoder_response_ids, doc_ids, q_ids = batch
+            prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids = batch
             prior_model_outputs = model.prior_model(prior_input_ids)
             prior_dist = F.softmax(prior_model_outputs["logits"], dim=-1)
 
