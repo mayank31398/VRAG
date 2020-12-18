@@ -53,6 +53,12 @@ def Train(args, train_dataset, eval_dataset, model):
     num_times_best_acc = 0
     best_found = False
 
+    results = Evaluate(args, eval_dataset, model)
+
+    logger.info("***** Eval results *****")
+    for key in sorted(results.keys()):
+        logger.info("  %s = %s", key, str(results[key]))
+
     for _ in trange(int(args.num_train_epochs), desc="Epoch"):
         model.train()
         local_steps = 0

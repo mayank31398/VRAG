@@ -1,5 +1,5 @@
 import sys
 
 if __name__ == "__main__":
-    from rag import main
+    from baseline_quac import main
     main.main()

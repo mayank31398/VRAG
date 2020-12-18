@@ -4,6 +4,7 @@ import logging
 import re
 import sys
 
+import jsonlines
 import numpy as np
 from nltk.translate.bleu_score import sentence_bleu
 from nltk.translate.meteor_score import single_meteor_score
@@ -157,6 +158,8 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--output_file", type=str)
+    parser.add_argument("--knowledge_file", type=str)
+    parser.add_argument("--score_file", type=str)
     args = parser.parse_args()
 
     predictions = json.load(open(args.output_file, "r"))
@@ -165,22 +168,46 @@ def main():
     for example in predictions:
         selection_metrics.update(
             example["topk_documents_ids"], example["doc_id"])
-    results = selection_metrics.scores()
+    results_selection = selection_metrics.scores()
 
     logger.info("***** Selection results *****")
-    for key in sorted(results.keys()):
-        logger.info("  %s = %s", key, str(results[key]))
+    for key in sorted(results_selection.keys()):
+        logger.info("  %s = %s", key, str(results_selection[key]))
 
     generation_metrics = GenerationMetrics()
     for example in predictions:
-        if (example["doc_id"] != None):
-            generation_metrics.update(
-                example["response"], example["generated_response_from_1_doc"])
-    results = generation_metrics.scores()
+        generation_metrics.update(
+            example["response"], example["generated_response_from_1_doc"])
+    results_generation = generation_metrics.scores()
 
     logger.info("***** Generation results *****")
-    for key in sorted(results.keys()):
-        logger.info("  %s = %s", key, str(results[key]))
+    for key in sorted(results_generation.keys()):
+        logger.info("  %s = %s", key, str(results_generation[key]))
+
+    knowledge = {}
+    with jsonlines.open(args.knowledge_file, "r") as f:
+        for i in f.iter():
+            knowledge[i["id"]] = i
+            del knowledge[i["id"]]["id"]
+
+    for i in range(len(predictions)):
+        if (predictions[i]["doc_id"] != None):
+            predictions[i]["correct_document"] = knowledge[predictions[i]["doc_id"]]
+        else:
+            predictions[i]["correct_document"] = None
+
+        predictions[i]["topk_documents"] = []
+        for j in range(len(predictions[i]["topk_documents_ids"])):
+            predictions[i]["topk_documents"].append(
+                knowledge[predictions[i]["topk_documents_ids"][j]])
+
+    json.dump(predictions, open(args.output_file, "w"), indent=4)
+
+    scores = {
+        "selection": results_selection,
+        "generation": results_generation
+    }
+    json.dump(scores, open(args.score_file, "w"), indent=4)
 
 
 if (__name__ == "__main__"):
