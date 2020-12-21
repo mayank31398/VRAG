@@ -1,3 +1,4 @@
 data_marco
 __pycache__
 *.pyc
+logs*

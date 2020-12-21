@@ -23,16 +23,10 @@ def embed(documents, ctx_encoder, ctx_tokenizer):
     return {"embeddings": embeddings.detach().cpu().numpy()}
 
 
-def _dec(documents, decoder_tokenizer):
-    input_ids = decoder_tokenizer.convert_tokens_to_ids(
-        decoder_tokenizer.tokenize(documents["text"]))
-    return {"decoder_input_ids": input_ids}
-
-
-class KnowledgeWalker:
-    def __init__(self, args, decoder_tokenizer):
+def KnowledgeWalker(args):
+    if (args.build_index):
         dataset = load_dataset("json", data_files=[
-                                args.knowledge_file], split="train")
+            args.knowledge_file], split="train")
 
         # And compute the embeddings
         ctx_encoder = DPRContextEncoder.from_pretrained(
@@ -56,36 +50,22 @@ class KnowledgeWalker:
             features=new_features
         )
 
-        new_features = Features(
-            {
-                "title": Value("string"),
-                "text": Value("string"),
-                "id": Value("int32"),
-                "decoder_input_ids": Sequence(Value("int32")),
-                "embeddings": Sequence(Value("float32"))
-            }
-        )  # optional, save as float32 instead of float64 to save space
-        dataset = dataset.map(
-            partial(_dec, decoder_tokenizer=decoder_tokenizer),
-            batched=False,
-            features=new_features
-        )
+        os.makedirs(os.path.join(args.index_path), exist_ok=True)
+        dataset.save_to_disk(os.path.join(args.index_path, "dataset"))
 
         index = faiss.IndexHNSWFlat(
             args.index_args["dimensions"], args.index_args["links"], faiss.METRIC_INNER_PRODUCT)
         dataset.add_faiss_index("embeddings", custom_index=index)
 
-        self.dataset = dataset
+        dataset.get_index("embeddings").save(
+            os.path.join(args.index_path, "index.faiss"))
 
-    def __iter__(self):
-        for example in self.dataset:
-            yield example
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, index):
-        return self.dataset[index]
+        exit()
+    else:
+        dataset = load_from_disk(os.path.join(args.index_path, "dataset"))
+        dataset.load_faiss_index("embeddings", os.path.join(
+            args.index_path, "index.faiss"))
+    return dataset
 
 
 class DatasetWalker:

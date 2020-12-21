@@ -1,4 +1,5 @@
 import json
+import os
 import random
 
 import jsonlines
@@ -59,25 +60,26 @@ def CreateKnowledge(docs):
 
 def main():
     train = []
-    with jsonlines.open("data_quac/augmented/train.txt", "r") as f:
+    with jsonlines.open("data_quac/preprocessed/train.txt", "r") as f:
         for example in f.iter():
             train.append(example)
     train, docs = CreateDataset(train)
 
     val = []
-    with jsonlines.open("data_quac/augmented/val.txt", "r") as f:
+    with jsonlines.open("data_quac/preprocessed/dev.txt", "r") as f:
         for example in f.iter():
             val.append(example)
     val, docs = CreateDataset(val, docs=docs)
 
     test = []
-    with jsonlines.open("data_quac/augmented/test.txt", "r") as f:
+    with jsonlines.open("data_quac/preprocessed/test.txt", "r") as f:
         for example in f.iter():
             test.append(example)
     test, docs = CreateDataset(test, docs=docs)
 
     docs = CreateKnowledge(docs)
     random.shuffle(docs)
+    os.makedirs("data_quac/rag_format")
 
     with jsonlines.open("data_quac/rag_format/knowledge.jsonl", "w") as f:
         f.write_all(docs)

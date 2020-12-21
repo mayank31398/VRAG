@@ -1,0 +1,44 @@
+QUAC
+test = test
+val = val
+train = train
+
+if (correct_doc is absent):
+    if (answer == "cannotanswer"):
+        cantanswer_acc is computed
+    else:
+        total bleu is computed
+        correct_doc bleu is computed
+else:
+    recall is computed
+
+    if (answer == "cannotanswer"):
+        cantanswer_acc is computed
+    else:
+        total bleu is computed
+        correct_doc bleu is computed
+
+
+bleu total = (bleu when doc present, bleu when doc absent)
+
+
+MARCO
+test = val
+val = 10% train
+train = 90% train
+
+if (correct_doc is absent):
+    if (answer == "cannotanswer"):
+        cantanswer_acc is computed
+    else:
+        total bleu is computed
+        correct_doc bleu is computed
+else:
+    recall is computed
+
+    # won't trigger in marco
+    if (answer == "cannotanswer"):
+        cantanswer_acc is computed
+    else:
+        total bleu is computed
+        correct_doc bleu is computed

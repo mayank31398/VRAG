@@ -1,4 +1,5 @@
 import json
+import os
 import random
 
 import jsonlines
@@ -19,7 +20,7 @@ def CreateDataset(dataset, docs={}, qid=0):
         correct_doc_id = None
 
         if (answer.lower() == "no answer present."):
-            continue
+            answer = "CANNOTANSWER"
 
         for evidence in evidences:
             if (evidence["passage_text"] not in docs):
@@ -70,6 +71,8 @@ def main():
 
     docs = CreateKnowledge(docs)
     random.shuffle(docs)
+
+    os.makedirs("data_marco/rag_format")
 
     with jsonlines.open("data_marco/rag_format/knowledge.jsonl", "w") as f:
         f.write_all(docs)

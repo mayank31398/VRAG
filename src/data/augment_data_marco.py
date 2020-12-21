@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import random
 
 random.seed(42)
@@ -8,6 +9,9 @@ random.seed(42)
 # create test set
 with open("data_marco/dev_v2.1.json") as f:
     examples = json.load(f)
+
+print(len(examples["query"]))
+os.makedirs("data_marco/augmented")
 
 with open("data_marco/augmented/test.json", "w") as f:
     json.dump(examples, f, indent=4)

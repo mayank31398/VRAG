@@ -18,7 +18,7 @@ from .data import write_preds
 from .dataset import (DecoderDataset, KnowledgeWalker, PosteriorDataset,
                       PriorDataset, UnsupervisedDataset)
 from .models import DecoderModel, PosteriorModel, PriorModel, UnsupervisedModel
-from .scorer import SelectionMetrics
+from .scorer import Metrics
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def Evaluate(args, eval_dataset, model):
     )
 
     epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
-    selection_metrics = SelectionMetrics()
+    metrics = Metrics()
 
     d = {}
     with torch.no_grad():
@@ -124,7 +124,8 @@ def Evaluate(args, eval_dataset, model):
 
         for batch in epoch_iterator:
             prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids = batch
-            prior_model_outputs = model.prior_model(prior_input_ids)
+            prior_model_outputs = model.prior_model(
+                prior_input_ids, model.topk)
             prior_dist = F.softmax(prior_model_outputs["logits"], dim=-1)
 
             # sequence_length
@@ -138,34 +139,27 @@ def Evaluate(args, eval_dataset, model):
             # 1
             q_ids = q_ids[0]
             # topk x sequence_length
-            topk_documents_decoder_input_ids = prior_model_outputs[
-                "topk_documents_decoder_input_ids"][0]
+            topk_documents_text = prior_model_outputs["topk_documents_text"][0]
             # sequence_length
-            best_document_decoder_input_ids = topk_documents_decoder_input_ids[0]
+            best_document_text = topk_documents_text[0]
 
-            reciprocal_rank, recall_1, recall_k = selection_metrics.update(
-                topk_documents_ids, doc_ids)
+            metrics.update_selection(topk_documents_ids, doc_ids)
 
             # NOTE if args.eval_only is true batch size should be 1
             if (args.eval_only):
                 output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
-                    args, decoder_input_ids, best_document_decoder_input_ids)
+                    args, decoder_input_ids, best_document_text)
 
                 d[q_ids] = {
                     "prior_dist": prior_dist,
                     "topk_documents_ids": topk_documents_ids,
-                    "generated_response_from_1_doc": output_text_from_1_doc,
-                    # "selection_scores": {
-                    #     "rr": reciprocal_rank,
-                    #     "r@1": recall_1,
-                    #     "r@" + str(selection_metrics.topk): recall_k
-                    # }
+                    "generated_response_from_1_doc": output_text_from_1_doc
                 }
 
     if (args.eval_only):
         write_preds(eval_dataset, args.output_file, d)
 
-    results = selection_metrics.scores()
+    results = metrics.scores()
     return results
 
 
@@ -190,6 +184,9 @@ def main():
                         help="Predictions will be written to this file.")
     parser.add_argument("--model_path", type=str,
                         help="Name of the experiment, checkpoints will be stored here")
+    parser.add_argument(
+        "--build_index", action="store_true", help="Build index")
+    parser.add_argument("--index_path", type=str, help="Path of the index")
     args = parser.parse_args()
 
     # Setup logging
@@ -216,13 +213,9 @@ def main():
     # Set seed
     set_seed(args)
 
-    # Need decoder tokenizer for getting indexed passages
-    decoder_model = DecoderModel(args)
-    indexed_passages = KnowledgeWalker(args, decoder_model.tokenizer)
-    del decoder_model
+    indexed_passages = KnowledgeWalker(args)
 
-    unsupervised_model = UnsupervisedModel(
-        args, indexed_passages.dataset).cuda()
+    unsupervised_model = UnsupervisedModel(args, indexed_passages).cuda()
     tokenizers = {
         "prior_tokenizer": unsupervised_model.prior_model.tokenizer,
         "posterior_tokenizer": unsupervised_model.posterior_model.tokenizer,
