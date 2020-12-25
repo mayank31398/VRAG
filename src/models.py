@@ -16,6 +16,17 @@ from .generate import top_filtering
 logger = logging.getLogger(__name__)
 
 
+def MyDotProduct(a, b):
+    # batch_size x 1 x topk
+    a_ = a.unsqueeze(1)
+    # batch_size x topk x 1
+    b_ = b.unsqueeze(2)
+
+    x = torch.bmm(a_, b_)
+    x = x.squeeze(2)
+    return x
+
+
 def GetUnionKL(prior_model_outputs, posterior_model_outputs):
     prior_topk_documents_ids = prior_model_outputs["topk_documents_ids"]
     posterior_topk_documents_ids = posterior_model_outputs["topk_documents_ids"]
@@ -388,17 +399,13 @@ class DecoderModel(nn.Module):
             probs = F.softmax(lm_logits, dim=-1)
 
             prev = torch.multinomial(probs, 1)
-            # FIXME
             if (i < args.generation_args["min_length"] and prev.item() in special_tokens_ids):
-                # c = 0
-                # while (prev.item() in special_tokens_ids and c < 100):
                 while (prev.item() in special_tokens_ids):
                     if probs.max().item() == 1:
                         logger.warning(
                             "Warning: model generating special token with probability 1! Breaking...")
                         break
                     prev = torch.multinomial(probs, num_samples=1)
-                    # c += 1
 
             if (prev.item() in special_tokens_ids):
                 break
@@ -444,8 +451,45 @@ class UnsupervisedModel(nn.Module):
          doc_ids,
          q_ids) = batch
 
+        # # NOTE logsumexp
+        # if (self.modeling_method == "RAG"):
+        #     prior_model_outputs = self.prior_model(prior_input_ids, self.topk)
+        #     # batch_size x topk
+        #     prior_log_dist = F.log_softmax(
+        #         prior_model_outputs["logits"], dim=-1)
+
+        #     # batch_size x topk x sequence_length
+        #     decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
+        #         decoder_input_ids, decoder_response_ids, prior_model_outputs["topk_documents_text"])
+
+        #     # batch_size x topk
+        #     # batch_size x topk x sequence_length x vocab_size
+        #     decoder_neg_log_likelihood, _ = self.decoder_model(
+        #         [decoder_input_ids, decoder_response_ids])
+
+        #     # batch_size x topk
+        #     log_sum_payload = -decoder_neg_log_likelihood + prior_log_dist
+        #     # 1
+        #     loss = (-torch.logsumexp(log_sum_payload, dim=-1)).mean()
+
+        #     # make_dot(loss).render("RAG", format="svg")
+        #     # exit()
+
+        #     print("loss =", loss)
+        #     print("prior_log_dist =", prior_log_dist)
+        #     print("decoder_neg_log_likelihood =", decoder_neg_log_likelihood)
+        #     print("log_sum_payload =", log_sum_payload)
+        #     print("topk_documents_ids =",
+        #           prior_model_outputs["topk_documents_ids"])
+        #     print("doc_ids =", doc_ids)
+        #     print("q_ids =", q_ids)
+        #     print()
+
+        #     return loss
+        # NOTE old code
         if (self.modeling_method == "RAG"):
             prior_model_outputs = self.prior_model(prior_input_ids, self.topk)
+            # batch_size x topk
             prior_dist = F.softmax(prior_model_outputs["logits"], dim=-1)
 
             # batch_size x topk x sequence_length
@@ -454,22 +498,25 @@ class UnsupervisedModel(nn.Module):
 
             # batch_size x topk
             # batch_size x topk x sequence_length x vocab_size
-            decoder_loss, decoder_output_logits = self.decoder_model(
-                [decoder_input_ids[:, :self.decoder_topk, :], decoder_response_ids[:, :self.decoder_topk, :]])
+            decoder_loss, _ = self.decoder_model(
+                [decoder_input_ids, decoder_response_ids])
 
             # batch_size x topk
             decoder_likelihood = torch.exp(-decoder_loss)
 
             # batch_size x 1
-            p_y_given_x = (prior_dist * decoder_likelihood).sum(dim=-1)
+            # p_y_given_x = (prior_dist * decoder_likelihood).sum(dim=-1)
+            p_y_given_x = MyDotProduct(prior_dist, decoder_likelihood)
             # 1
-            loss = (-torch.log(p_y_given_x)).mean()
+            loss = (-torch.log(torch.abs(p_y_given_x))).mean()
 
             # make_dot(loss).render("RAG", format="svg")
             # exit()
 
             print("loss =", loss)
             print("prior_dist =", prior_dist)
+            print("decoder_likelihood =", decoder_likelihood)
+            print("p(y|x) =", p_y_given_x)
             print("topk_documents_ids =",
                   prior_model_outputs["topk_documents_ids"])
             print("doc_ids =", doc_ids)
@@ -480,20 +527,22 @@ class UnsupervisedModel(nn.Module):
         elif (self.modeling_method == "VRAG"):
             posterior_model_outputs = self.posterior_model(
                 [posterior_input_ids, posterior_token_type_ids], self.topk)
-            posterior_dist = F.softmax(
-                posterior_model_outputs["logits"], dim=-1)
 
             # batch_size x topk x sequence_length
             decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
                 decoder_input_ids, decoder_response_ids, posterior_model_outputs["topk_documents_text"])
 
-            # batch_size x topk
-            # batch_size x topk x sequence_length x vocab_size
-            decoder_loss, decoder_output_logits = self.decoder_model(
+            # batch_size x decoder_topk
+            # batch_size x decoder_topk x sequence_length x vocab_size
+            decoder_loss, _ = self.decoder_model(
                 [decoder_input_ids[:, :self.decoder_topk, :], decoder_response_ids[:, :self.decoder_topk, :]])
 
             # batch_size x 1
-            e = (posterior_dist * decoder_loss).sum(dim=-1)
+            posterior_dist = F.softmax(
+                posterior_model_outputs["logits"][:, :self.decoder_topk], dim=-1)
+            # e = (posterior_dist * decoder_loss).sum(dim=-1)
+            e = MyDotProduct(posterior_dist, decoder_loss)
+
             # 1
             loss = e.mean()
 
@@ -507,7 +556,9 @@ class UnsupervisedModel(nn.Module):
 
             print("loss =", loss)
             print("KL =", KL)
+            print("decoder_loss =", decoder_loss)
             print("posterior_dist =", posterior_dist)
+            print("e =", e)
             print("topk_documents_ids =",
                   posterior_model_outputs["topk_documents_ids"])
             print("doc_ids =", doc_ids)

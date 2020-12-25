@@ -145,7 +145,6 @@ def Evaluate(args, eval_dataset, model):
 
             metrics.update_selection(topk_documents_ids, doc_ids)
 
-            # NOTE if args.eval_only is true batch size should be 1
             if (args.eval_only):
                 output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
                     args, decoder_input_ids, best_document_text)
@@ -212,6 +211,7 @@ def main():
 
     # Set seed
     set_seed(args)
+    assert args.decoder_topk <= args.topk, "decoder_topk should be <= topk"
 
     indexed_passages = KnowledgeWalker(args)
 
