@@ -8,6 +8,7 @@ from argparse import Namespace
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from torchviz import make_dot
@@ -124,26 +125,27 @@ def Evaluate(args, eval_dataset, model):
 
         for batch in epoch_iterator:
             prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids = batch
-            prior_model_outputs = model.prior_model(
-                prior_input_ids, model.topk)
-            prior_dist = F.softmax(prior_model_outputs["logits"], dim=-1)
+
+            prior_logits, _, prior_topk_documents_text, prior_topk_documents_ids, _, _ = model.prior_model(
+                prior_input_ids.cuda(), args.topk)
+            prior_dist = F.softmax(prior_logits, dim=-1)
 
             # sequence_length
             decoder_input_ids = decoder_input_ids[0]
             # topk
             prior_dist = prior_dist.detach().cpu().numpy().tolist()[0]
             # topk
-            topk_documents_ids = prior_model_outputs["topk_documents_ids"][0]
+            prior_topk_documents_ids = prior_topk_documents_ids[0]
             # 1
             doc_ids = doc_ids[0]
             # 1
             q_ids = q_ids[0]
             # topk x sequence_length
-            topk_documents_text = prior_model_outputs["topk_documents_text"][0]
+            topk_documents_text = prior_topk_documents_text[0]
             # sequence_length
             best_document_text = topk_documents_text[0]
 
-            metrics.update_selection(topk_documents_ids, doc_ids)
+            metrics.update_selection(prior_topk_documents_ids, doc_ids)
 
             if (args.eval_only):
                 output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
@@ -151,7 +153,7 @@ def Evaluate(args, eval_dataset, model):
 
                 d[q_ids] = {
                     "prior_dist": prior_dist,
-                    "topk_documents_ids": topk_documents_ids,
+                    "topk_documents_ids": prior_topk_documents_ids,
                     "generated_response_from_1_doc": output_text_from_1_doc
                 }
 
@@ -186,6 +188,7 @@ def main():
     parser.add_argument(
         "--build_index", action="store_true", help="Build index")
     parser.add_argument("--index_path", type=str, help="Path of the index")
+    parser.add_argument("--n_gpus", type=int, default=1, help="Num GPUS")
     args = parser.parse_args()
 
     # Setup logging
@@ -207,6 +210,9 @@ def main():
         args.update(params)
         args = Namespace(**args)
 
+        for key in vars(args):
+            logger.info(str(key) + " = " + str(vars(args)[key]))
+
     args.params = params  # used for saving checkpoints
 
     # Set seed
@@ -215,12 +221,21 @@ def main():
 
     indexed_passages = KnowledgeWalker(args)
 
+    args.batch_size = args.batch_size * args.n_gpus
     unsupervised_model = UnsupervisedModel(args, indexed_passages).cuda()
-    tokenizers = {
-        "prior_tokenizer": unsupervised_model.prior_model.tokenizer,
-        "posterior_tokenizer": unsupervised_model.posterior_model.tokenizer,
-        "decoder_tokenizer": unsupervised_model.decoder_model.tokenizer
-    }
+
+    if (args.n_gpus > 1):
+        tokenizers = {
+            "prior_tokenizer": unsupervised_model.prior_model.module.tokenizer,
+            "posterior_tokenizer": unsupervised_model.posterior_model.module.tokenizer,
+            "decoder_tokenizer": unsupervised_model.decoder_model.module.tokenizer
+        }
+    else:
+        tokenizers = {
+            "prior_tokenizer": unsupervised_model.prior_model.tokenizer,
+            "posterior_tokenizer": unsupervised_model.posterior_model.tokenizer,
+            "decoder_tokenizer": unsupervised_model.decoder_model.tokenizer
+        }
 
     set_seed(args)
 

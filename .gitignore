@@ -1,5 +1,6 @@
-data_marco
-data_quac
+.DS_Store
+data*
+logs*
 __pycache__
 *.pyc
-logs*
+src/models_backup.py
