@@ -24,9 +24,6 @@ def GetUnionKL(prior_model_outputs, posterior_model_outputs):
     prior_topk_documents_embeddings = prior_model_outputs["topk_documents_embeddings"]
     posterior_topk_documents_embeddings = posterior_model_outputs["topk_documents_embeddings"]
 
-    prior_dist_full = []
-    posterior_dist_full = []
-
     batch_size = len(prior_topk_documents_ids)
     topk = len(prior_topk_documents_ids[0])
 
@@ -47,11 +44,47 @@ def GetUnionKL(prior_model_outputs, posterior_model_outputs):
                     posterior_topk_documents_embeddings[i][k])
 
         all_docs_embeds = torch.tensor(all_docs_embeds).T.cuda()
-        prior_logits_full = prior_question_embeddings @ all_docs_embeds
-        posterior_logits_full = posterior_question_embeddings @ all_docs_embeds
 
-        prior_log_dist_full = F.log_softmax(prior_logits_full, dim=-1)
-        posterior_dist_full = F.softmax(posterior_logits_full, dim=-1)
+        prior_logits_full = prior_question_embeddings[i].unsqueeze(
+            0) @ all_docs_embeds
+        posterior_logits_full = posterior_question_embeddings[i].unsqueeze(
+            0) @ all_docs_embeds
+
+        prior_log_dist_full = F.log_softmax(
+            prior_logits_full, dim=-1).squeeze()
+        posterior_dist_full = F.softmax(
+            posterior_logits_full, dim=-1).squeeze()
+
+        KL += F.kl_div(prior_log_dist_full, posterior_dist_full)
+    KL /= batch_size
+    return KL
+
+
+def GetPostKL(prior_model_outputs, posterior_model_outputs):
+    prior_topk_documents_ids = prior_model_outputs["topk_documents_ids"]
+    posterior_topk_documents_ids = posterior_model_outputs["topk_documents_ids"]
+    prior_question_embeddings = prior_model_outputs["question_embeddings"]
+    posterior_question_embeddings = posterior_model_outputs["question_embeddings"]
+    prior_topk_documents_embeddings = prior_model_outputs["topk_documents_embeddings"]
+    posterior_topk_documents_embeddings = posterior_model_outputs["topk_documents_embeddings"]
+
+    batch_size = len(prior_topk_documents_ids)
+    topk = len(prior_topk_documents_ids[0])
+
+    KL = 0
+    for i in range(batch_size):
+        all_docs_embeds = posterior_topk_documents_embeddings[i]
+        all_docs_embeds = torch.tensor(all_docs_embeds).T.cuda()
+
+        prior_logits_full = prior_question_embeddings[i].unsqueeze(
+            0) @ all_docs_embeds
+        posterior_logits_full = posterior_question_embeddings[i].unsqueeze(
+            0) @ all_docs_embeds
+
+        prior_log_dist_full = F.log_softmax(
+            prior_logits_full, dim=-1).squeeze()
+        posterior_dist_full = F.softmax(
+            posterior_logits_full, dim=-1).squeeze()
 
         KL += F.kl_div(prior_log_dist_full, posterior_dist_full)
     KL /= batch_size
@@ -335,6 +368,7 @@ class DecoderModel(nn.Module):
 
         lm_logits = decoder_model_outputs[0]
         lm_logits = lm_logits.reshape(batch_size, topk, sequence_length, -1)
+        # FIXME divide parameter
         lm_logits = lm_logits / self.divide
 
         loss = self.compute_gen_loss_item(lm_logits, decoder_response_ids)
