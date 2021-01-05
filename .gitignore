@@ -1,5 +1,6 @@
 .DS_Store
-data*
+data_marco
+data_quac
 logs*
 __pycache__
 *.pyc
