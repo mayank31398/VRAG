@@ -156,11 +156,14 @@ def Evaluate(args, eval_dataset, model):
             if (args.eval_only):
                 output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
                     args, decoder_input_ids, best_document_text)
+                output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
+                    args, decoder_input_ids, topk_documents_text, prior_dist)
 
                 d[q_ids] = {
                     "prior_dist": prior_dist,
                     "topk_documents_ids": prior_topk_documents_ids,
-                    "generated_response_from_1_doc": output_text_from_1_doc
+                    "generated_response_from_1_doc": output_text_from_1_doc,
+                    "generated_response_from_k_docs": output_text_from_k_docs
                 }
 
     if (args.eval_only):
