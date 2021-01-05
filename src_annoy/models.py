@@ -14,7 +14,7 @@ from .data import pad_ids
 from .generate import top_filtering
 
 logger = logging.getLogger(__name__)
-
+EPSILON = 1e-10
 
 def GetUnionKL(prior_model_outputs, posterior_model_outputs):
     prior_topk_documents_ids = prior_model_outputs["topk_documents_ids"]
@@ -463,7 +463,7 @@ class UnsupervisedModel(nn.Module):
         if (self.modeling_method == "RAG"):
             prior_logits, _, prior_topk_documents_text, prior_topk_documents_ids, _, _ = self.prior_model(
                 prior_input_ids.cuda(), self.topk)
-            p_z_given_x = F.softmax(prior_logits, dim=-1)
+            p_z_given_x = F.softmax(prior_logits, dim=-1) + EPSILON
 
             decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
                 decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
@@ -471,9 +471,9 @@ class UnsupervisedModel(nn.Module):
             decoder_loss, _ = self.decoder_model(
                 [decoder_input_ids.cuda(), decoder_response_ids.cuda()])
 
-            p_y_given_zx = torch.exp(-decoder_loss)
+            p_y_given_zx = torch.exp(-decoder_loss) + EPSILON
 
-            p_y_given_x = (p_z_given_x * p_y_given_zx).sum(dim=-1)
+            p_y_given_x = (p_z_given_x * p_y_given_zx).sum(dim=-1) + EPSILON
             loss = (-torch.log(p_y_given_x)).mean()
 
             print("loss =", loss)
@@ -500,7 +500,7 @@ class UnsupervisedModel(nn.Module):
                 [decoder_input_ids[:, :self.decoder_topk, :], decoder_response_ids[:, :self.decoder_topk, :]])
 
             posterior_dist = F.softmax(
-                posterior_logits[:, :self.decoder_topk], dim=-1)
+                posterior_logits[:, :self.decoder_topk], dim=-1) + EPSILON
 
             e = (posterior_dist * decoder_loss).sum(dim=-1)
             loss = e.mean()

@@ -11,7 +11,7 @@
     "seed": 2021,
     "topk": 5,
     "decoder_topk": 5,
-    "divide": 10,
+    "divide": 1,
     "batch_size": 1,
     "warmup_steps": 0,
     "stopping_criteria": 5,

@@ -6,22 +6,72 @@ import os
 import random
 from argparse import Namespace
 
+import annoy
+import jsonlines
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
-from torchviz import make_dot
 from tqdm import tqdm, trange
-from transformers import AdamW, get_linear_schedule_with_warmup
+from transformers import (AdamW, DPRContextEncoder, DPRContextEncoderTokenizer,
+                          get_linear_schedule_with_warmup)
 
 from .data import write_preds
-from .dataset import (DecoderDataset, KnowledgeWalker, PosteriorDataset,
-                      PriorDataset, UnsupervisedDataset)
+from .dataset import (DecoderDataset, PosteriorDataset, PriorDataset,
+                      UnsupervisedDataset)
 from .models import DecoderModel, PosteriorModel, PriorModel, UnsupervisedModel
 from .scorer import Metrics
 
 logger = logging.getLogger(__name__)
+
+
+def embed(documents, ctx_encoder, ctx_tokenizer):
+    input_ids = ctx_tokenizer(documents["title"], documents["text"],
+                              truncation=True, padding="longest", return_tensors="pt")["input_ids"]
+    embeddings = ctx_encoder(input_ids.cuda(), return_dict=True).pooler_output
+    return embeddings.detach().cpu().numpy()
+
+
+class KnowledgeWalker:
+    def __init__(self, args):
+        self.dimension = args.index_args["dimensions"]
+        self.index = annoy.AnnoyIndex(self.dimension)
+
+        self.dataset = []
+        with jsonlines.open(args.knowledge_file, "r") as f:
+            for i in f.iter():
+                self.dataset.append(i)
+
+        if (args.build_index):
+            ctx_encoder = DPRContextEncoder.from_pretrained(
+                args.document_encoder_model_name).cuda()
+            ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained(
+                args.document_encoder_model_name)
+
+            self.vectors = []
+            for i in tqdm(self.dataset):
+                v = embed(i, ctx_encoder, ctx_tokenizer)
+                self.vectors.append(v)
+            self.vectors = np.concatenate(self.vectors)
+
+            for i, vec in tqdm(enumerate(self.vectors)):
+                self.index.add_item(i, vec.tolist())
+            self.index.build(args.index_args["num_trees"])
+
+            os.makedirs(args.index_path, exist_ok=True)
+            np.save(os.path.join(args.index_path, "vectors.npy"), self.vectors)
+            self.index.save(args.index_path)
+        else:
+            self.vectors = np.load(os.path.join(
+                args.index_path, "vectors.npy"))
+            self.index.load(args.index_path)
+
+    def retieve(self, vector, k=5):
+        indices = self.index.get_nns_by_vector(vector.tolist(), k)
+        retrieved_vectors = [self.vectors[i] for i in indices]
+        retrieved_dataset = [self.dataset[i] for i in indices]
+        return retrieved_vectors, retrieved_dataset
 
 
 def set_seed(args):
@@ -65,12 +115,18 @@ def Train(args, train_dataset, eval_dataset, model):
         local_steps = 0
         tr_loss = 0
         epoch_iterator = tqdm(train_dataloader, desc="Iteration")
+        skip_counter = 0
 
         for step, batch in enumerate(epoch_iterator):
             global_step += 1
 
             # with torch.autograd.detect_anomaly():
             loss = model(batch)
+            if (torch.isnan(loss).sum() >= 1):
+                skip_counter += 1
+                print("skipped =", skip_counter)
+                continue
+
             loss = loss / args.gradient_accumulation_steps
             loss.backward()
             tr_loss += loss.item()
