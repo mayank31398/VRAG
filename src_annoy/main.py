@@ -35,8 +35,8 @@ def embed(documents, ctx_encoder, ctx_tokenizer):
 
 class KnowledgeWalker:
     def __init__(self, args):
-        self.dimension = args.index_args["dimensions"]
-        self.index = annoy.AnnoyIndex(self.dimension)
+        self.index = annoy.AnnoyIndex(
+            args.index_args["dimensions"], metric="angular")
 
         self.dataset = []
         with jsonlines.open(args.knowledge_file, "r") as f:
@@ -55,23 +55,34 @@ class KnowledgeWalker:
                 self.vectors.append(v)
             self.vectors = np.concatenate(self.vectors)
 
-            for i, vec in tqdm(enumerate(self.vectors)):
+            for i, vec in enumerate(self.vectors):
                 self.index.add_item(i, vec.tolist())
             self.index.build(args.index_args["num_trees"])
 
             os.makedirs(args.index_path, exist_ok=True)
             np.save(os.path.join(args.index_path, "vectors.npy"), self.vectors)
-            self.index.save(args.index_path)
+            self.index.save(os.path.join(args.index_path, "index.annoy"))
+
+            exit()
         else:
             self.vectors = np.load(os.path.join(
                 args.index_path, "vectors.npy"))
-            self.index.load(args.index_path)
+            self.index.load(os.path.join(args.index_path, "index.annoy"))
 
-    def retieve(self, vector, k=5):
-        indices = self.index.get_nns_by_vector(vector.tolist(), k)
-        retrieved_vectors = [self.vectors[i] for i in indices]
-        retrieved_dataset = [self.dataset[i] for i in indices]
-        return retrieved_vectors, retrieved_dataset
+    def retrieve(self, batch, k=5):
+        indices = []
+        for vec in batch:
+            indices.append(self.get_indices(vec, k))
+        return indices
+
+    def get_indices(self, vector, k):
+        return self.index.get_nns_by_vector(vector.tolist(), k)
+
+    def get_vectors_by_indices(self, indices):
+        return [self.vectors[i] for i in indices]
+
+    def get_data_by_indices(self, indices):
+        return [self.dataset[i] for i in indices]
 
 
 def set_seed(args):
@@ -182,30 +193,38 @@ def Evaluate(args, eval_dataset, model):
         for batch in epoch_iterator:
             prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids = batch
 
-            prior_logits, _, prior_topk_documents_text, prior_topk_documents_ids, _, _ = model.prior_model(
+            prior_indices, prior_logits, _, _ = model.prior_model(
                 prior_input_ids.cuda(), args.topk)
-            prior_dist = F.softmax(prior_logits, dim=-1)
 
-            # sequence_length
+            prior_indices = prior_indices[0]
+
+            if (args.n_gpus > 1):
+                prior_data = model.prior_model.module.indexed_passages.get_data_by_indices(
+                    prior_indices)
+            else:
+                prior_data = model.prior_model.indexed_passages.get_data_by_indices(
+                    prior_indices)
+
+            prior_logits = prior_logits[0]
+            prior_dist = F.softmax(
+                prior_logits).detach().cpu().numpy().tolist()
+
             decoder_input_ids = decoder_input_ids[0]
-            # topk
-            prior_dist = prior_dist.detach().cpu().numpy().tolist()[0]
-            # topk
-            prior_topk_documents_ids = prior_topk_documents_ids[0]
-            # 1
+
+            prior_topk_documents_ids = [i["id"] for i in prior_data]
+            prior_topk_documents_text = [i["text"] for i in prior_data]
             doc_ids = doc_ids[0]
-            # 1
             q_ids = q_ids[0]
-            # topk x sequence_length
-            topk_documents_text = prior_topk_documents_text[0]
-            # sequence_length
-            best_document_text = topk_documents_text[0]
 
             metrics.update_selection(prior_topk_documents_ids, doc_ids)
 
             if (args.eval_only):
-                output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
-                    args, decoder_input_ids, best_document_text)
+                if (args.n_gpus > 1):
+                    output_text_from_1_doc = model.decoder_model.module.generate_from_1_doc(
+                        args, decoder_input_ids, prior_topk_documents_text[0])
+                else:
+                    output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
+                        args, decoder_input_ids, prior_topk_documents_text[0])
 
                 d[q_ids] = {
                     "prior_dist": prior_dist,
@@ -239,6 +258,7 @@ def main():
                         help="If set, the labels will be loaded not from the default path, but from this file instead.")
     parser.add_argument("--output_file", type=str, default="",
                         help="Predictions will be written to this file.")
+    parser.add_argument("--no_verbose", action="store_true")
     parser.add_argument("--model_path", type=str,
                         help="Name of the experiment, checkpoints will be stored here")
     parser.add_argument(
@@ -273,7 +293,6 @@ def main():
 
     # Set seed
     set_seed(args)
-    assert args.decoder_topk <= args.topk, "decoder_topk should be <= topk"
 
     indexed_passages = KnowledgeWalker(args)
 
