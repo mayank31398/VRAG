@@ -393,6 +393,55 @@ class DecoderModel(nn.Module):
             current_output, skip_special_tokens=True)
         return output_text
 
+    # NOTE only works with batch size 1
+    def generate_from_k_docs(self, args, decoder_input_ids, topk_documents_decoder_text, prior_dist):
+        special_tokens_ids = self.tokenizer.convert_tokens_to_ids(
+            self.SPECIAL_TOKENS_VALUES)
+        current_output = []
+
+        for i in range(args.generation_args["max_length"]):
+            decoder_input_ids_, _, decoder_token_type_ids_ = self._prepare_inputs(
+                [decoder_input_ids], [current_output], [topk_documents_decoder_text], with_eos=False)
+
+            decoder_input_ids_ = decoder_input_ids_.cuda()
+            decoder_token_type_ids_ = decoder_token_type_ids_.cuda()
+
+            decoder_input_ids_ = decoder_input_ids_.squeeze()
+            decoder_token_type_ids_ = decoder_token_type_ids_.squeeze()
+
+            decoder_model_outputs = self.decoder(
+                input_ids=decoder_input_ids_, token_type_ids=decoder_token_type_ids_)
+
+            lm_logits = decoder_model_outputs[0]
+
+            probs = []
+            for i in range(lm_logits.shape[0]):
+                lm_logits_ = lm_logits[i, -1, :] / \
+                    args.generation_args["temperature"]
+                lm_logits_ = top_filtering(
+                    lm_logits_, top_k=args.generation_args["top_k"], top_p=args.generation_args["top_p"])
+                probs_ = F.softmax(lm_logits_, dim=-1)
+                probs.append(probs_.unsqueeze(0))
+            probs = torch.cat(probs, dim=0)
+            probs = (torch.tensor(prior_dist).unsqueeze(0) @ probs).squeeze()
+
+            prev = torch.multinomial(probs, 1)
+            if (i < args.generation_args["min_length"] and prev.item() in special_tokens_ids):
+                while (prev.item() in special_tokens_ids):
+                    if probs.max().item() == 1:
+                        logger.warning(
+                            "Warning: model generating special token with probability 1! Breaking...")
+                        break
+                    prev = torch.multinomial(probs, num_samples=1)
+
+            if (prev.item() in special_tokens_ids):
+                break
+            current_output.append(prev.item())
+
+        output_text = self.tokenizer.decode(
+            current_output, skip_special_tokens=True)
+        return output_text
+
     def save_model(self, args, model_name):
         output_dir = os.path.join(args.model_path, "decoder", model_name)
         os.makedirs(output_dir, exist_ok=True)

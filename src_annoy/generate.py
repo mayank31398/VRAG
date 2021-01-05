@@ -8,13 +8,13 @@ logger = logging.getLogger(__name__)
 
 def top_filtering(logits, top_k=0, top_p=0.0, threshold=-float('Inf'), filter_value=-float('Inf')):
     top_k = min(top_k, logits.size(-1))
-    if top_k > 0:
+    if (top_k > 0):
         # Remove all tokens with a probability less than the last token in the top-k tokens
         indices_to_remove = logits < torch.topk(logits, top_k)[
             0][..., -1, None]
         logits[indices_to_remove] = filter_value
 
-    if top_p > 0.0:
+    if (top_p > 0):
         # Compute cumulative probabilities of sorted tokens
         sorted_logits, sorted_indices = torch.sort(logits, descending=True)
         cumulative_probabilities = torch.cumsum(

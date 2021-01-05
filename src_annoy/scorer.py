@@ -23,12 +23,18 @@ class Metrics():
         self._selection_mrrk = []
         self._selection_r1 = []
         self._selection_rk = []
-        self._bleu1 = []
-        self._bleu2 = []
-        self._bleu3 = []
-        self._bleu4 = []
-        self._ref_cannotanswer = []
-        self._hyp_cannotanswer = []
+        self._bleu1_from_1_doc = []
+        self._bleu2_from_1_doc = []
+        self._bleu3_from_1_doc = []
+        self._bleu4_from_1_doc = []
+        self._ref_cannotanswer_from_1_doc = []
+        self._hyp_cannotanswer_from_1_doc = []
+        self._bleu1_from_k_docs = []
+        self._bleu2_from_k_docs = []
+        self._bleu3_from_k_docs = []
+        self._bleu4_from_k_docs = []
+        self._ref_cannotanswer_from_k_docs = []
+        self._hyp_cannotanswer_from_k_docs = []
         self.topk = topk
 
         self._has_selection_scores = False
@@ -89,30 +95,47 @@ class Metrics():
         self._selection_r1.append(recall_1)
         self._selection_rk.append(recall_k)
 
-    def update_generation(self, ref_response, hyp_response):
+    def update_generation(self, ref_response, hyp_response, num_docs=1):
         self._has_generation_scores = True
         ref_tokens = self._normalize_text(ref_response).split()
         hyp_tokens = self._normalize_text(hyp_response).split()
 
-        if (ref_tokens == ["cannotanswer"]):
-            self._ref_cannotanswer.append(1)
-        else:
-            self._ref_cannotanswer.append(0)
+        if (num_docs == 1):
+            if (ref_tokens == ["cannotanswer"]):
+                self._ref_cannotanswer_from_1_doc.append(1)
+            else:
+                self._ref_cannotanswer_from_1_doc.append(0)
 
-        if (hyp_tokens == ["cannotanswer"]):
-            self._hyp_cannotanswer.append(1)
+            if (hyp_tokens == ["cannotanswer"]):
+                self._hyp_cannotanswer_from_1_doc.append(1)
+            else:
+                self._hyp_cannotanswer_from_1_doc.append(0)
         else:
-            self._hyp_cannotanswer.append(0)
+            if (ref_tokens == ["cannotanswer"]):
+                self._ref_cannotanswer_from_k_docs.append(1)
+            else:
+                self._ref_cannotanswer_from_k_docs.append(0)
+
+            if (hyp_tokens == ["cannotanswer"]):
+                self._hyp_cannotanswer_from_k_docs.append(1)
+            else:
+                self._hyp_cannotanswer_from_k_docs.append(0)
 
         bleu1 = self._bleu(ref_tokens, hyp_tokens, n=1)
         bleu2 = self._bleu(ref_tokens, hyp_tokens, n=2)
         bleu3 = self._bleu(ref_tokens, hyp_tokens, n=3)
         bleu4 = self._bleu(ref_tokens, hyp_tokens, n=4)
 
-        self._bleu1.append(bleu1)
-        self._bleu2.append(bleu2)
-        self._bleu3.append(bleu3)
-        self._bleu4.append(bleu4)
+        if (num_docs == 1):
+            self._bleu1_from_1_doc.append(bleu1)
+            self._bleu2_from_1_doc.append(bleu2)
+            self._bleu3_from_1_doc.append(bleu3)
+            self._bleu4_from_1_doc.append(bleu4)
+        else:
+            self._bleu1_from_k_docs.append(bleu1)
+            self._bleu2_from_k_docs.append(bleu2)
+            self._bleu3_from_k_docs.append(bleu3)
+            self._bleu4_from_k_docs.append(bleu4)
 
     def scores(self):
         results = {}
@@ -125,16 +148,28 @@ class Metrics():
             results.update(selection_scores)
         if (self._has_generation_scores):
             generation_scores = {
-                "bleu-1": np.mean(self._bleu1),
-                "bleu-2": np.mean(self._bleu2),
-                "bleu-3": np.mean(self._bleu3),
-                "bleu-4": np.mean(self._bleu4),
-                "accuracy_CANNOTANSWER": accuracy_score(self._ref_cannotanswer, self._hyp_cannotanswer),
-                "recall_CANNOTANSWER": recall_score(self._ref_cannotanswer, self._hyp_cannotanswer),
-                "precision_CANNOTANSWER": precision_score(self._ref_cannotanswer, self._hyp_cannotanswer),
-                "f1_CANNOTANSWER": f1_score(self._ref_cannotanswer, self._hyp_cannotanswer)
+                "bleu-1": np.mean(self._bleu1_from_1_doc),
+                "bleu-2": np.mean(self._bleu2_from_1_doc),
+                "bleu-3": np.mean(self._bleu3_from_1_doc),
+                "bleu-4": np.mean(self._bleu4_from_1_doc),
+                "accuracy_CANNOTANSWER": accuracy_score(self._ref_cannotanswer_from_1_doc, self._hyp_cannotanswer_from_1_doc),
+                "recall_CANNOTANSWER": recall_score(self._ref_cannotanswer_from_1_doc, self._hyp_cannotanswer_from_1_doc),
+                "precision_CANNOTANSWER": precision_score(self._ref_cannotanswer_from_1_doc, self._hyp_cannotanswer_from_1_doc),
+                "f1_CANNOTANSWER": f1_score(self._ref_cannotanswer_from_1_doc, self._hyp_cannotanswer_from_1_doc)
             }
-            results.update(generation_scores)
+            results["1_doc"] = generation_scores
+
+            generation_scores = {
+                "bleu-1": np.mean(self._bleu1_from_k_docs),
+                "bleu-2": np.mean(self._bleu2_from_k_docs),
+                "bleu-3": np.mean(self._bleu3_from_k_docs),
+                "bleu-4": np.mean(self._bleu4_from_k_docs),
+                "accuracy_CANNOTANSWER": accuracy_score(self._ref_cannotanswer_from_k_docs, self._hyp_cannotanswer_from_k_docs),
+                "recall_CANNOTANSWER": recall_score(self._ref_cannotanswer_from_k_docs, self._hyp_cannotanswer_from_k_docs),
+                "precision_CANNOTANSWER": precision_score(self._ref_cannotanswer_from_k_docs, self._hyp_cannotanswer_from_k_docs),
+                "f1_CANNOTANSWER": f1_score(self._ref_cannotanswer_from_k_docs, self._hyp_cannotanswer_from_k_docs)
+            }
+            results["k_docs"] = generation_scores
         return results
 
 
@@ -161,6 +196,8 @@ def main():
             example["topk_documents_ids"], example["doc_id"])
         metrics.update_generation(
             example["response"], example["generated_response_from_1_doc"])
+        metrics.update_generation(
+            example["response"], example["generated_response_from_k_docs"], num_docs="k")
     results = metrics.scores()
 
     logger.info("***** Results *****")
@@ -185,7 +222,6 @@ def main():
                 knowledge[predictions[i]["topk_documents_ids"][j]])
 
     json.dump(predictions, open(args.output_file, "w"), indent=4)
-
     json.dump(results, open(args.score_file, "w"), indent=4)
 
 
