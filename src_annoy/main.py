@@ -36,7 +36,7 @@ def embed(documents, ctx_encoder, ctx_tokenizer):
 class KnowledgeWalker:
     def __init__(self, args):
         self.index = annoy.AnnoyIndex(
-            args.index_args["dimensions"], metric="angular")
+            args.index_args["dimensions"], metric="euclidean")
 
         self.dataset = []
         with jsonlines.open(args.knowledge_file, "r") as f:

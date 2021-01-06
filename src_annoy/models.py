@@ -11,7 +11,6 @@ from transformers import (AutoConfig, AutoTokenizer, DPRQuestionEncoder,
                           GPT2LMHeadModel)
 
 from .data import pad_ids
-from .generate import top_filtering
 
 logger = logging.getLogger(__name__)
 EPSILON = 1e-10
@@ -350,96 +349,51 @@ class DecoderModel(nn.Module):
         return loss, lm_logits
 
     # NOTE only works with batch size 1
-    def generate_from_1_doc(self, args, decoder_input_ids, best_document_decoder_text):
-        special_tokens_ids = self.tokenizer.convert_tokens_to_ids(
-            self.SPECIAL_TOKENS_VALUES)
-        current_output = []
+    def generate_from_1_doc(self, args, decoder_input_ids, best_document_decoder_text, return_ids=False):
+        decoder_input_ids_, _, _ = self._prepare_inputs(
+            [decoder_input_ids], [[]], [[best_document_decoder_text]], with_eos=False)
+        decoder_input_ids_ = decoder_input_ids_.squeeze(1).cuda()
 
-        for i in range(args.generation_args["max_length"]):
-            decoder_input_ids_, _, decoder_token_type_ids_ = self._prepare_inputs(
-                [decoder_input_ids], [current_output], [[best_document_decoder_text]], with_eos=False)
+        output = self.decoder.generate(
+            input_ids=decoder_input_ids_,
+            max_length=args.generation_args["max_length"] +
+            decoder_input_ids_.shape[1],
+            min_length=args.generation_args["min_length"],
+            top_k=args.generation_args["top_k"],
+            top_p=args.generation_args["top_p"],
+            temperature=args.generation_args["temperature"],
+            bos_token_id=self.bos,
+            eos_token_id=self.eos,
+            pad_token_id=self.pad
+        )
 
-            decoder_input_ids_ = decoder_input_ids_.cuda()
-            decoder_token_type_ids_ = decoder_token_type_ids_.cuda()
-
-            decoder_input_ids_ = decoder_input_ids_.reshape(1, -1)
-            decoder_token_type_ids_ = decoder_token_type_ids_.reshape(1, -1)
-
-            decoder_model_outputs = self.decoder(
-                input_ids=decoder_input_ids_, token_type_ids=decoder_token_type_ids_)
-
-            lm_logits = decoder_model_outputs[0]
-
-            lm_logits = lm_logits[0, -1, :] / \
-                args.generation_args["temperature"]
-            lm_logits = top_filtering(
-                lm_logits, top_k=args.generation_args["top_k"], top_p=args.generation_args["top_p"])
-            probs = F.softmax(lm_logits, dim=-1)
-
-            prev = torch.multinomial(probs, 1)
-            if (i < args.generation_args["min_length"] and prev.item() in special_tokens_ids):
-                while (prev.item() in special_tokens_ids):
-                    if probs.max().item() == 1:
-                        logger.warning(
-                            "Warning: model generating special token with probability 1! Breaking...")
-                        break
-                    prev = torch.multinomial(probs, num_samples=1)
-
-            if (prev.item() in special_tokens_ids):
-                break
-            current_output.append(prev.item())
-
+        output = output[0][decoder_input_ids_.shape[1]:]
         output_text = self.tokenizer.decode(
-            current_output, skip_special_tokens=True)
+            output, skip_special_tokens=True)
+
+        if (return_ids):
+            return output_text, output.cpu().numpy().tolist()
         return output_text
 
     # NOTE only works with batch size 1
     def generate_from_k_docs(self, args, decoder_input_ids, topk_documents_decoder_text, prior_dist):
-        special_tokens_ids = self.tokenizer.convert_tokens_to_ids(
-            self.SPECIAL_TOKENS_VALUES)
-        current_output = []
+        p_y_given_zx = []
+        output_text = None
+        p_max = 0
+        for i in range(len(prior_dist)):
+            text_, decoder_response_ids = self.generate_from_1_doc(
+                args, decoder_input_ids, topk_documents_decoder_text[i], return_ids=True)
 
-        for i in range(args.generation_args["max_length"]):
-            decoder_input_ids_, _, decoder_token_type_ids_ = self._prepare_inputs(
-                [decoder_input_ids], [current_output], [topk_documents_decoder_text], with_eos=False)
+            decoder_input_ids_, decoder_response_ids_, _ = self._prepare_inputs(
+                [decoder_input_ids], [decoder_response_ids], [[topk_documents_decoder_text[i]]], with_eos=False)
+            decoder_loss, _ = self([decoder_input_ids_, decoder_response_ids_])
 
-            decoder_input_ids_ = decoder_input_ids_.cuda()
-            decoder_token_type_ids_ = decoder_token_type_ids_.cuda()
+            p_y_given_zx = torch.exp(-decoder_loss).squeeze().cpu().numpy()
+            p_y_given_x = p_y_given_zx * prior_dist[i]
+            if (p_y_given_x > p_max):
+                p_max = p_y_given_x
+                output_text = text_
 
-            decoder_input_ids_ = decoder_input_ids_.squeeze()
-            decoder_token_type_ids_ = decoder_token_type_ids_.squeeze()
-
-            decoder_model_outputs = self.decoder(
-                input_ids=decoder_input_ids_, token_type_ids=decoder_token_type_ids_)
-
-            lm_logits = decoder_model_outputs[0]
-
-            probs = []
-            for i in range(lm_logits.shape[0]):
-                lm_logits_ = lm_logits[i, -1, :] / \
-                    args.generation_args["temperature"]
-                lm_logits_ = top_filtering(
-                    lm_logits_, top_k=args.generation_args["top_k"], top_p=args.generation_args["top_p"])
-                probs_ = F.softmax(lm_logits_, dim=-1)
-                probs.append(probs_.unsqueeze(0))
-            probs = torch.cat(probs, dim=0)
-            probs = (torch.tensor(prior_dist).unsqueeze(0) @ probs).squeeze()
-
-            prev = torch.multinomial(probs, 1)
-            if (i < args.generation_args["min_length"] and prev.item() in special_tokens_ids):
-                while (prev.item() in special_tokens_ids):
-                    if probs.max().item() == 1:
-                        logger.warning(
-                            "Warning: model generating special token with probability 1! Breaking...")
-                        break
-                    prev = torch.multinomial(probs, num_samples=1)
-
-            if (prev.item() in special_tokens_ids):
-                break
-            current_output.append(prev.item())
-
-        output_text = self.tokenizer.decode(
-            current_output, skip_special_tokens=True)
         return output_text
 
     def save_model(self, args, model_name):
@@ -515,9 +469,11 @@ class UnsupervisedModel(nn.Module):
                 prior_indices)
 
             if (self.parallel):
-                decoder_input_ids, decoder_response_ids, _ = self.decoder_model.module._prepare_inputs(decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+                decoder_input_ids, decoder_response_ids, _ = self.decoder_model.module._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
             else:
-                decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+                decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
 
             decoder_loss, _ = self.decoder_model(
                 [decoder_input_ids.cuda(), decoder_response_ids.cuda()])
@@ -551,9 +507,11 @@ class UnsupervisedModel(nn.Module):
                 prior_indices)
 
             if (self.parallel):
-                decoder_input_ids, decoder_response_ids, _ = self.decoder_model.module._prepare_inputs(decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
+                decoder_input_ids, decoder_response_ids, _ = self.decoder_model.module._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
             else:
-                decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
+                decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
 
             decoder_loss, _ = self.decoder_model(
                 [decoder_input_ids, decoder_response_ids])

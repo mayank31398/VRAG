@@ -5,3 +5,4 @@ logs*
 __pycache__
 *.pyc
 src/models_backup.py
+tmp.py
