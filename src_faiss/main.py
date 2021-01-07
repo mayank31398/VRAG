@@ -132,32 +132,44 @@ def Evaluate(args, eval_dataset, model):
         for batch in epoch_iterator:
             prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids = batch
 
-            prior_logits, _, prior_topk_documents_text, prior_topk_documents_ids, _, _ = model.prior_model(
+            prior_logits, prior_indices, _ = model.prior_model(
                 prior_input_ids.cuda(), args.topk)
-            prior_dist = F.softmax(prior_logits, dim=-1)
+            prior_dist = F.softmax(prior_logits, dim=-1).cpu().tolist()[0]
+            prior_indices = prior_indices.cpu().tolist()
 
-            # sequence_length
             decoder_input_ids = decoder_input_ids[0]
-            # topk
-            prior_dist = prior_dist.detach().cpu().numpy().tolist()[0]
-            # topk
-            prior_topk_documents_ids = prior_topk_documents_ids[0]
-            # 1
+
+            if (args.n_gpus > 1):
+                prior_topk_documents_ids = model.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_indices, "id")[0]
+
+                prior_topk_documents_text = model.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_indices, "text")[0]
+            else:
+                prior_topk_documents_ids = model.prior_model.indexed_passages.get_field_by_indices(
+                    prior_indices, "id")[0]
+
+                prior_topk_documents_text = model.prior_model.indexed_passages.get_field_by_indices(
+                    prior_indices, "text")[0]
+
             doc_ids = doc_ids[0]
-            # 1
             q_ids = q_ids[0]
-            # topk x sequence_length
-            topk_documents_text = prior_topk_documents_text[0]
-            # sequence_length
-            best_document_text = topk_documents_text[0]
+
+            best_document_text = prior_topk_documents_text[0]
 
             metrics.update_selection(prior_topk_documents_ids, doc_ids)
 
             if (args.eval_only):
-                output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
-                    args, decoder_input_ids, best_document_text)
-                output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
-                    args, decoder_input_ids, topk_documents_text, prior_dist)
+                if (args.n_gpus > 1):
+                    output_text_from_1_doc = model.decoder_model.module.generate_from_1_doc(
+                        args, decoder_input_ids, best_document_text)
+                    output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
+                        args, decoder_input_ids, prior_topk_documents_text, prior_dist)
+                else:
+                    output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
+                        args, decoder_input_ids, best_document_text)
+                    output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
+                        args, decoder_input_ids, prior_topk_documents_text, prior_dist)
 
                 d[q_ids] = {
                     "prior_dist": prior_dist,
@@ -226,7 +238,6 @@ def main():
 
     # Set seed
     set_seed(args)
-    assert args.decoder_topk <= args.topk, "decoder_topk should be <= topk"
 
     indexed_passages = KnowledgeWalker(args)
 

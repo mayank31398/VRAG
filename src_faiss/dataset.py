@@ -23,49 +23,75 @@ def embed(documents, ctx_encoder, ctx_tokenizer):
     return {"embeddings": embeddings.detach().cpu().numpy()}
 
 
-def KnowledgeWalker(args):
-    if (args.build_index):
-        dataset = load_dataset("json", data_files=[
-            args.knowledge_file], split="train")
+class KnowledgeWalker:
+    def __init__(self, args):
+        if (args.build_index):
+            dataset = load_dataset("json", data_files=[
+                args.knowledge_file], split="train")
 
-        # And compute the embeddings
-        ctx_encoder = DPRContextEncoder.from_pretrained(
-            args.document_encoder_model_name).cuda()
-        ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained(
-            args.document_encoder_model_name)
+            # And compute the embeddings
+            ctx_encoder = DPRContextEncoder.from_pretrained(
+                args.document_encoder_model_name).cuda()
+            ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained(
+                args.document_encoder_model_name)
 
-        new_features = Features(
-            {
-                "title": Value("string"),
-                "text": Value("string"),
-                "id": Value("int32"),
-                "embeddings": Sequence(Value("float32"))
-            }
-        )  # optional, save as float32 instead of float64 to save space
-        dataset = dataset.map(
-            partial(embed, ctx_encoder=ctx_encoder,
-                    ctx_tokenizer=ctx_tokenizer),
-            batched=True,
-            batch_size=args.processing_args["batch_size"],
-            features=new_features
-        )
+            new_features = Features(
+                {
+                    "title": Value("string"),
+                    "text": Value("string"),
+                    "id": Value("int32"),
+                    "embeddings": Sequence(Value("float32"))
+                }
+            )  # optional, save as float32 instead of float64 to save space
+            dataset = dataset.map(
+                partial(embed, ctx_encoder=ctx_encoder,
+                        ctx_tokenizer=ctx_tokenizer),
+                batched=True,
+                batch_size=args.processing_args["batch_size"],
+                features=new_features
+            )
 
-        os.makedirs(os.path.join(args.index_path), exist_ok=True)
-        dataset.save_to_disk(os.path.join(args.index_path, "dataset"))
+            os.makedirs(os.path.join(args.index_path), exist_ok=True)
+            dataset.save_to_disk(os.path.join(args.index_path, "dataset"))
 
-        index = faiss.IndexHNSWFlat(
-            args.index_args["dimensions"], args.index_args["links"], faiss.METRIC_INNER_PRODUCT)
-        dataset.add_faiss_index("embeddings", custom_index=index)
+            index = faiss.IndexHNSWFlat(
+                args.index_args["dimensions"], args.index_args["links"], faiss.METRIC_INNER_PRODUCT)
+            dataset.add_faiss_index("embeddings", custom_index=index)
 
-        dataset.get_index("embeddings").save(
-            os.path.join(args.index_path, "index.faiss"))
+            dataset.get_index("embeddings").save(
+                os.path.join(args.index_path, "index.faiss"))
 
-        exit()
-    else:
-        dataset = load_from_disk(os.path.join(args.index_path, "dataset"))
-        dataset.load_faiss_index("embeddings", os.path.join(
-            args.index_path, "index.faiss"))
-    return dataset
+            exit()
+        else:
+            dataset = load_from_disk(os.path.join(args.index_path, "dataset"))
+            dataset.load_faiss_index("embeddings", os.path.join(
+                args.index_path, "index.faiss"))
+            self.dataset = dataset
+            self.inds = {}
+            for i, e in enumerate(self.dataset):
+                self.inds[e["text"]] = i
+
+    def retrieve(self, question_embeddings, topk):
+        question_embeddings = question_embeddings.detach().cpu().numpy()
+        retrievals = self.dataset.get_nearest_examples_batch(
+            'embeddings', question_embeddings, k=topk)
+
+        topk_documents_text = [i["text"] for i in retrievals.total_examples]
+        indices = []
+        for i in range(len(topk_documents_text)):
+            indices.append([])
+            for j in range(len(topk_documents_text[0])):
+                indices[i].append(self.inds[topk_documents_text[i][j]])
+
+        return indices
+
+    def get_field_by_indices(self, indices, field="text"):
+        results = []
+        for i in range(len(indices)):
+            results.append([])
+            for j in range(len(indices[0])):
+                results[i].append(self.dataset[indices[i][j]][field])
+        return results
 
 
 class DatasetWalker:

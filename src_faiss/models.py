@@ -117,13 +117,6 @@ class PriorModel(nn.Module):
 
         self.indexed_passages = indexed_passages
 
-    def retrieve(self, question_embeddings, topk):
-        # does retrieval
-        question_embeddings = question_embeddings.detach().cpu().numpy()
-        retrievals = self.indexed_passages.get_nearest_examples_batch(
-            'embeddings', question_embeddings, k=topk)
-        return retrievals
-
     def forward(self, batch, topk):
         # batch_size x sequence_length
         input_ids = batch
@@ -131,24 +124,18 @@ class PriorModel(nn.Module):
         # batch_size x 768
         question_embeddings = self.encoder(
             input_ids=input_ids[:, :self.max_length]).pooler_output
-        retrievals = self.retrieve(question_embeddings, topk)
+        retrieved_indices = self.indexed_passages.retrieve(
+            question_embeddings, topk)
 
-        logits = []
-        for i, document in enumerate(retrievals.total_examples):
-            # (1 x 768) x (768 x topk)
-            logits_ = question_embeddings[i].unsqueeze(
-                0) @ torch.tensor(document["embeddings"]).T.cuda()
-            logits.append(logits_)
-        # batch_size x topk
-        logits = torch.cat(logits)
+        topk_documents_embeddings = self.indexed_passages.get_field_by_indices(
+            retrieved_indices, "embeddings")
+        topk_documents_embeddings = torch.tensor(
+            topk_documents_embeddings).cuda()
 
-        topk_documents_title = [i["title"] for i in retrievals.total_examples]
-        topk_documents_text = [i["text"] for i in retrievals.total_examples]
-        topk_documents_ids = [i["id"] for i in retrievals.total_examples]
-        topk_documents_embeddings = [i["embeddings"]
-                                     for i in retrievals.total_examples]
+        logits = torch.bmm(topk_documents_embeddings,
+                           question_embeddings.unsqueeze(2)).squeeze(2)
 
-        return logits, topk_documents_title, topk_documents_text, topk_documents_ids, question_embeddings, topk_documents_embeddings
+        return logits, torch.tensor(retrieved_indices).cuda(), question_embeddings
 
     def save_model(self, args, model_name):
         output_dir = os.path.join(args.model_path, "prior", model_name)
@@ -190,13 +177,6 @@ class PosteriorModel(nn.Module):
 
         self.indexed_passages = indexed_passages
 
-    def retrieve(self, question_embeddings, topk):
-        # does retrieval
-        question_embeddings = question_embeddings.detach().cpu().numpy()
-        retrievals = self.indexed_passages.get_nearest_examples_batch(
-            'embeddings', question_embeddings, k=topk)
-        return retrievals
-
     def forward(self, batch, topk):
         input_ids, token_type_ids = batch
 
@@ -207,24 +187,18 @@ class PosteriorModel(nn.Module):
         # batch_size x 768
         question_embeddings = self.encoder(
             input_ids=input_ids[:, :self.max_length], token_type_ids=token_type_ids[:, :self.max_length]).pooler_output
-        retrievals = self.retrieve(question_embeddings, topk)
+        retrieved_indices = self.indexed_passages.retrieve(
+            question_embeddings, topk)
 
-        logits = []
-        for i, document in enumerate(retrievals.total_examples):
-            # (1 x 768) x (768 x topk)
-            logits_ = question_embeddings[i].unsqueeze(
-                0) @ torch.tensor(document["embeddings"]).T.cuda()
-            logits.append(logits_)
-        # batch_size x topk
-        logits = torch.cat(logits)
+        topk_documents_embeddings = self.indexed_passages.get_field_by_indices(
+            retrieved_indices, "embeddings")
+        topk_documents_embeddings = torch.tensor(
+            topk_documents_embeddings).cuda()
 
-        topk_documents_title = [i["title"] for i in retrievals.total_examples]
-        topk_documents_text = [i["text"] for i in retrievals.total_examples]
-        topk_documents_ids = [i["id"] for i in retrievals.total_examples]
-        topk_documents_embeddings = [i["embeddings"]
-                                     for i in retrievals.total_examples]
+        logits = torch.bmm(topk_documents_embeddings,
+                           question_embeddings.unsqueeze(2)).squeeze(2)
 
-        return logits, topk_documents_title, topk_documents_text, topk_documents_ids, question_embeddings, topk_documents_embeddings
+        return logits, torch.tensor(retrieved_indices).cuda(), question_embeddings
 
     def save_model(self, args, model_name):
         output_dir = os.path.join(args.model_path, "posterior", model_name)
@@ -445,7 +419,6 @@ class UnsupervisedModel(nn.Module):
         if (self.modeling_method == "VRAG"):
             self.kl_beta = args.kl_beta
         self.topk = args.topk
-        self.decoder_topk = args.decoder_topk
         self.prior_model = PriorModel(args, indexed_passages)
         self.posterior_model = PosteriorModel(args, indexed_passages)
         self.decoder_model = DecoderModel(args)
@@ -454,6 +427,9 @@ class UnsupervisedModel(nn.Module):
             self.prior_model = nn.DataParallel(self.prior_model)
             self.posterior_model = nn.DataParallel(self.posterior_model)
             self.decoder_model = nn.DataParallel(self.decoder_model)
+            self.parallel = True
+        else:
+            self.parallel = False
 
     def forward(self, batch):
         (prior_input_ids,
@@ -465,15 +441,31 @@ class UnsupervisedModel(nn.Module):
          q_ids) = batch
 
         if (self.modeling_method == "RAG"):
-            prior_logits, _, prior_topk_documents_text, prior_topk_documents_ids, _, _ = self.prior_model(
+            prior_logits, prior_indices, _ = self.prior_model(
                 prior_input_ids.cuda(), self.topk)
             p_z_given_x = F.softmax(prior_logits, dim=-1) + EPSILON
 
-            decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
-                decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+            prior_indices = prior_indices.cpu().tolist()
+
+            if (self.parallel):
+                prior_topk_documents_text = self.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_indices, "text")
+                prior_topk_documents_ids = self.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_indices, "id")
+
+                decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model.module._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+            else:
+                prior_topk_documents_text = self.prior_model.indexed_passages.get_field_by_indices(
+                    prior_indices, "text")
+                prior_topk_documents_ids = self.prior_model.indexed_passages.get_field_by_indices(
+                    prior_indices, "id")
+
+                decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
 
             decoder_loss, _ = self.decoder_model(
-                [decoder_input_ids.cuda(), decoder_response_ids.cuda()])
+                [decoder_input_ids_.cuda(), decoder_response_ids_.cuda()])
 
             p_y_given_zx = torch.exp(-decoder_loss) + EPSILON
 
@@ -491,20 +483,51 @@ class UnsupervisedModel(nn.Module):
 
             return loss
         elif (self.modeling_method == "VRAG"):
-            posterior_logits, _, posterior_topk_documents_text, posterior_topk_documents_ids, posterior_question_embeddings, posterior_topk_documents_embeddings = self.posterior_model(
+            posterior_logits, posterior_indices, posterior_question_embeddings = self.posterior_model(
                 [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], self.topk)
 
-            _, _, _, prior_topk_documents_ids, prior_question_embeddings, prior_topk_documents_embeddings = self.prior_model(
+            prior_logits, prior_indices, prior_question_embeddings = self.prior_model(
                 prior_input_ids.cuda(), self.topk)
 
-            decoder_input_ids, decoder_response_ids, _ = self.decoder_model._prepare_inputs(
-                decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
+            posterior_indices = posterior_indices.cpu().tolist()
+            prior_indices = prior_indices.cpu().tolist()
+
+            if (self.parallel):
+                posterior_topk_documents_text = self.posterior_model.module.indexed_passages.get_field_by_indices(
+                    posterior_indices, "text")
+                posterior_topk_documents_ids = self.posterior_model.module.indexed_passages.get_field_by_indices(
+                    posterior_indices, "id")
+                posterior_topk_documents_embeddings = self.posterior_model.module.indexed_passages.get_field_by_indices(
+                    posterior_indices, "embeddings")
+
+                prior_topk_documents_ids = self.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_indices, "id")
+                prior_topk_documents_embeddings = self.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_indices, "embeddings")
+
+                decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model.module._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
+            else:
+                posterior_topk_documents_text = self.posterior_model.indexed_passages.get_field_by_indices(
+                    posterior_indices, "text")
+                posterior_topk_documents_ids = self.posterior_model.indexed_passages.get_field_by_indices(
+                    posterior_indices, "id")
+                posterior_topk_documents_embeddings = self.posterior_model.indexed_passages.get_field_by_indices(
+                    posterior_indices, "embeddings")
+
+                prior_topk_documents_ids = self.prior_model.indexed_passages.get_field_by_indices(
+                    prior_indices, "id")
+                prior_topk_documents_embeddings = self.prior_model.indexed_passages.get_field_by_indices(
+                    prior_indices, "embeddings")
+
+                decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
 
             decoder_loss, _ = self.decoder_model(
-                [decoder_input_ids[:, :self.decoder_topk, :], decoder_response_ids[:, :self.decoder_topk, :]])
+                [decoder_input_ids_, decoder_response_ids_])
 
             posterior_dist = F.softmax(
-                posterior_logits[:, :self.decoder_topk], dim=-1) + EPSILON
+                posterior_logits, dim=-1) + EPSILON
 
             e = (posterior_dist * decoder_loss).sum(dim=-1)
             loss = e.mean()
@@ -528,7 +551,8 @@ class UnsupervisedModel(nn.Module):
             print("decoder_loss =", decoder_loss)
             print("posterior_dist =", posterior_dist)
             print("e =", e)
-            print("topk_documents_ids =", posterior_topk_documents_ids)
+            print("topk_documents_ids =",
+                  posterior_model_outputs["topk_documents_ids"])
             print("doc_ids =", doc_ids)
             print("q_ids =", q_ids)
             print()
@@ -536,9 +560,14 @@ class UnsupervisedModel(nn.Module):
             return loss
 
     def save_model(self, args, model_name):
-        self.prior_model.save_model(args, model_name)
-        self.posterior_model.save_model(args, model_name)
-        self.decoder_model.save_model(args, model_name)
+        if (self.parallel):
+            self.prior_model.module.save_model(args, model_name)
+            self.posterior_model.module.save_model(args, model_name)
+            self.decoder_model.module.save_model(args, model_name)
+        else:
+            self.prior_model.save_model(args, model_name)
+            self.posterior_model.save_model(args, model_name)
+            self.decoder_model.save_model(args, model_name)
 
     def GetParameters(self):
         params = list(self.prior_model.parameters()) + \
