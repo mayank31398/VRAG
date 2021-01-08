@@ -37,22 +37,24 @@ class DatasetWalker:
             self.ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained(
                 args.document_encoder_model_name)
 
-            for i in range(len(self.dataset)):
+            for i in tqdm(range(len(self.dataset))):
                 self.dataset[i] = self.embed(
                     self.dataset[i], self.ctx_encoder, self.ctx_tokenizer)
 
     def embed(self, example, ctx_encoder, ctx_tokenizer):
         example["doc_embeddings"] = []
+        titles = []
+        texts = []
         for i in example["docs"]:
-            input_ids = ctx_tokenizer(
-                i["title"], i["text"], truncation=True, return_tensors="pt")["input_ids"]
-            embeddings = ctx_encoder(
-                input_ids.cuda(), return_dict=True).pooler_output
+            titles.append(i["title"])
+            texts.append(i["text"])
+        input_ids = ctx_tokenizer(
+            titles, texts, truncation=True, padding="longest", return_tensors="pt")["input_ids"]
+        embeddings = ctx_encoder(
+            input_ids.cuda(), return_dict=True).pooler_output
 
-            example["doc_embeddings"].append(embeddings.detach().cpu().numpy())
-            example["doc_embeddings"] = np.concatenate(example["doc_embeddings"])
+        example["doc_embeddings"] = embeddings.detach().cpu().numpy()
 
-        del example["docs"]
         return example
 
     def __iter__(self):
@@ -83,6 +85,7 @@ class BaseDataset(torch.utils.data.Dataset):
             self.speaker2 = self.tokenizer.convert_tokens_to_ids(
                 self.tokenizer.tokenize("<speaker2>"))[0]
 
+        self.dataset_walker = data_walker
         self.dialog = args.dialog
         self.examples = self._create_examples()
 
@@ -131,9 +134,9 @@ class BaseDataset(torch.utils.data.Dataset):
 
 
 class PriorDataset(BaseDataset):
-    def __init__(self, args, tokenizer, split, labels_file=None):
+    def __init__(self, args, tokenizer, data_walker=None):
         super(PriorDataset, self).__init__(
-            args, tokenizer, split, labels_file)
+            args, tokenizer, data_walker)
 
     def build_input_from_segments(self, example):
         input_ids = [self.cls] + example["x_ids"] + [self.sep]
@@ -145,21 +148,16 @@ class PriorDataset(BaseDataset):
 
         d = {
             "example": example,
-            "input_ids": input_ids
+            "input_ids": input_ids,
+            "doc_embeddings": example["doc_embeddings"]
         }
         return d
 
-    def collate_fn(self, batch):
-        input_ids = [x["input_ids"] for x in batch]
-        input_ids = torch.tensor(pad_ids(input_ids, self.pad))
-
-        return input_ids
-
 
 class PosteriorDataset(BaseDataset):
-    def __init__(self, args, tokenizer, split, labels_file=None):
+    def __init__(self, args, tokenizer, data_walker=None):
         super(PosteriorDataset, self).__init__(
-            args, tokenizer, split, labels_file)
+            args, tokenizer, data_walker)
 
     def build_input_from_segments(self, example):
         input_ids = [self.cls] + example["x_ids"] + [self.sep]
@@ -177,18 +175,10 @@ class PosteriorDataset(BaseDataset):
         d = {
             "example": example,
             "input_ids": input_ids,
-            "token_type_ids": token_type_ids
+            "token_type_ids": token_type_ids,
+            "doc_embddings": example["doc_embeddings"]
         }
         return d
-
-    def collate_fn(self, batch):
-        input_ids = [x["input_ids"] for x in batch]
-        input_ids = torch.tensor(pad_ids(input_ids, self.pad))
-
-        token_type_ids = [x["token_type_ids"] for x in batch]
-        token_type_ids = torch.tensor(pad_ids(token_type_ids, self.pad))
-
-        return input_ids, token_type_ids
 
 
 class DecoderDataset(BaseDataset):
@@ -238,7 +228,8 @@ class DecoderDataset(BaseDataset):
                 "x_ids": x_ids,
                 "y_ids": y_ids,
                 "doc_id": doc_id,
-                "qid": qid
+                "qid": qid,
+                "docs": i["docs"]
             }
             examples.append(example)
 
@@ -256,16 +247,10 @@ class DecoderDataset(BaseDataset):
         d = {
             "example": example,
             "input_ids": input_ids,
-            "response_ids": response_ids
+            "response_ids": response_ids,
+            "docs": example["docs"]
         }
         return d
-
-    def collate_fn(self, batch):
-        # Needs document so these ids are incomplete
-        input_ids = [x["input_ids"] for x in batch]
-        response_ids = [x["response_ids"] for x in batch]
-
-        return input_ids, response_ids
 
 
 class UnsupervisedDataset(torch.utils.data.Dataset):
@@ -274,7 +259,7 @@ class UnsupervisedDataset(torch.utils.data.Dataset):
         self.posterior_tokenizer = tokenizers["posterior_tokenizer"]
         self.decoder_tokenizer = tokenizers["decoder_tokenizer"]
 
-        self.dataset_walker = DatasetWalker(
+        dataset_walker = DatasetWalker(
             args, split=split, labels_file=labels_file)
 
         self.prior_dataset = PriorDataset(
@@ -296,7 +281,9 @@ class UnsupervisedDataset(torch.utils.data.Dataset):
             "decoder_input_ids": decoder_example["input_ids"],
             "decoder_response_ids": decoder_example["response_ids"],
             "doc_id": prior_example["example"]["doc_id"],
-            "qid": prior_example["example"]["qid"]
+            "qid": prior_example["example"]["qid"],
+            "doc_embeddings": prior_example["doc_embeddings"],
+            "docs": decoder_example["docs"]
         }
         return d
 
@@ -321,7 +308,12 @@ class UnsupervisedDataset(torch.utils.data.Dataset):
         doc_ids = [x["doc_id"] for x in batch]
         q_ids = [x["qid"] for x in batch]
 
-        return prior_input_ids, posterior_input_ids, posterior_token_type_ids, decoder_input_ids, decoder_response_ids, doc_ids, q_ids
+        doc_embeddings = [x["doc_embeddings"] for x in batch]
+        doc_embeddings = torch.tensor(doc_embeddings)
+
+        docs = [x["docs"] for x in batch]
+
+        return prior_input_ids, posterior_input_ids, posterior_token_type_ids, decoder_input_ids, decoder_response_ids, doc_ids, q_ids, doc_embeddings, docs
 
     def __len__(self):
         return len(self.prior_dataset)

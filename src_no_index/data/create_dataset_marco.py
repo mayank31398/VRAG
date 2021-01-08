@@ -10,7 +10,6 @@ random.seed(42)
 
 def CreateDataset(dataset, docs={}, qid=0):
     l = []
-    doc_id = len(docs)
     qid = 0
 
     for key in dataset["query"]:
@@ -22,24 +21,28 @@ def CreateDataset(dataset, docs={}, qid=0):
         if (answer.lower() == "no answer present."):
             answer = "CANNOTANSWER"
 
-        for evidence in evidences:
-            if (evidence["passage_text"] not in docs):
-                docs[evidence["passage_text"]] = doc_id
-                doc_id += 1
+        e = []
+        for doc_id, evidence in enumerate(evidences):
+            t = {
+                "title": "",
+                "text": evidence["passage_text"]
+            }
+            e.append(t)
 
-                if (evidence["is_selected"] == 1):
-                    correct_doc_id = doc_id
+            if (evidence["is_selected"] == 1):
+                correct_doc_id = doc_id
 
         d = {
             "qid": qid,
             "doc_id": correct_doc_id,
             "query": question,
-            "response": answer
+            "response": answer,
+            "docs": e
         }
         l.append(d)
         qid += 1
 
-    return l, docs
+    return l
 
 
 def CreateKnowledge(docs):
@@ -59,31 +62,25 @@ def CreateKnowledge(docs):
 def main():
     with open("data_marco/augmented/train.json", "r") as f:
         train = json.load(f)
-    train, docs = CreateDataset(train)
+    train = CreateDataset(train)
 
     with open("data_marco/augmented/val.json", "r") as f:
         val = json.load(f)
-    val, docs = CreateDataset(val, docs=docs)
+    val = CreateDataset(val)
 
     with open("data_marco/augmented/test.json", "r") as f:
         test = json.load(f)
-    test, docs = CreateDataset(test, docs=docs)
+    test = CreateDataset(test)
 
-    docs = CreateKnowledge(docs)
-    random.shuffle(docs)
+    os.makedirs("data_marco/close_format")
 
-    os.makedirs("data_marco/rag_format")
-
-    with jsonlines.open("data_marco/rag_format/knowledge.jsonl", "w") as f:
-        f.write_all(docs)
-
-    with open("data_marco/rag_format/train.json", "w") as f:
+    with open("data_marco/close_format/train.json", "w") as f:
         json.dump(train, f, indent=4)
 
-    with open("data_marco/rag_format/val.json", "w") as f:
+    with open("data_marco/close_format/val.json", "w") as f:
         json.dump(val, f, indent=4)
 
-    with open("data_marco/rag_format/test.json", "w") as f:
+    with open("data_marco/close_format/test.json", "w") as f:
         json.dump(test, f, indent=4)
 
 

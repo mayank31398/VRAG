@@ -16,9 +16,10 @@ from tqdm import tqdm, trange
 from transformers import AdamW, get_linear_schedule_with_warmup
 
 from .data import write_preds
-from .dataset import (DecoderDataset, PosteriorDataset,
-                      PriorDataset, UnsupervisedDataset)
-from .models import DecoderModel, PosteriorModel, PriorModel, UnsupervisedModel
+from .dataset import (DecoderDataset, PosteriorDataset, PriorDataset,
+                      UnsupervisedDataset)
+from .models import (DecoderModel, PosteriorModel, PriorModel,
+                     UnsupervisedModel, get_by_indices)
 from .scorer import Metrics
 
 logger = logging.getLogger(__name__)
@@ -130,27 +131,18 @@ def Evaluate(args, eval_dataset, model):
         model.eval()
 
         for batch in epoch_iterator:
-            prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids = batch
+            prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids, document_embeddings, docs = batch
 
-            prior_logits, prior_indices, _ = model.prior_model(
-                prior_input_ids.cuda(), args.topk)
+            prior_logits, prior_topk_documents_ids, _ = model.prior_model(
+                [prior_input_ids.cuda(), document_embeddings.cuda()], args.topk)
             prior_dist = F.softmax(prior_logits, dim=-1).cpu().tolist()[0]
-            prior_indices = prior_indices.cpu().tolist()
+            prior_topk_documents_ids = prior_topk_documents_ids.cpu().tolist()[
+                0]
 
             decoder_input_ids = decoder_input_ids[0]
 
-            if (args.n_gpus > 1):
-                prior_topk_documents_ids = model.prior_model.module.indexed_passages.get_field_by_indices(
-                    prior_indices, "id")[0]
-
-                prior_topk_documents_text = model.prior_model.module.indexed_passages.get_field_by_indices(
-                    prior_indices, "text")[0]
-            else:
-                prior_topk_documents_ids = model.prior_model.indexed_passages.get_field_by_indices(
-                    prior_indices, "id")[0]
-
-                prior_topk_documents_text = model.prior_model.indexed_passages.get_field_by_indices(
-                    prior_indices, "text")[0]
+            prior_topk_documents_text = get_by_indices(
+                docs, [prior_topk_documents_ids])[0]
 
             doc_ids = doc_ids[0]
             q_ids = q_ids[0]
@@ -160,16 +152,10 @@ def Evaluate(args, eval_dataset, model):
             metrics.update_selection(prior_topk_documents_ids, doc_ids)
 
             if (args.eval_only):
-                if (args.n_gpus > 1):
-                    output_text_from_1_doc = model.decoder_model.module.generate_from_1_doc(
-                        args, decoder_input_ids, best_document_text)
-                    output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
-                        args, decoder_input_ids, prior_topk_documents_text, prior_dist)
-                else:
-                    output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
-                        args, decoder_input_ids, best_document_text)
-                    output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
-                        args, decoder_input_ids, prior_topk_documents_text, prior_dist)
+                output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
+                    args, decoder_input_ids, best_document_text)
+                output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
+                    args, decoder_input_ids, prior_topk_documents_text, prior_dist)
 
                 d[q_ids] = {
                     "prior_dist": prior_dist,
@@ -202,7 +188,6 @@ def main():
                         help="Predictions will be written to this file.")
     parser.add_argument("--model_path", type=str,
                         help="Name of the experiment, checkpoints will be stored here")
-    parser.add_argument("--n_gpus", type=int, default=1, help="Num GPUS")
     parser.add_argument("--dialog", action="store_true", help="dialog setting")
     args = parser.parse_args()
 
@@ -233,21 +218,13 @@ def main():
     # Set seed
     set_seed(args)
 
-    args.batch_size = args.batch_size * args.n_gpus
     unsupervised_model = UnsupervisedModel(args).cuda()
 
-    if (args.n_gpus > 1):
-        tokenizers = {
-            "prior_tokenizer": unsupervised_model.prior_model.module.tokenizer,
-            "posterior_tokenizer": unsupervised_model.posterior_model.module.tokenizer,
-            "decoder_tokenizer": unsupervised_model.decoder_model.module.tokenizer
-        }
-    else:
-        tokenizers = {
-            "prior_tokenizer": unsupervised_model.prior_model.tokenizer,
-            "posterior_tokenizer": unsupervised_model.posterior_model.tokenizer,
-            "decoder_tokenizer": unsupervised_model.decoder_model.tokenizer
-        }
+    tokenizers = {
+        "prior_tokenizer": unsupervised_model.prior_model.tokenizer,
+        "posterior_tokenizer": unsupervised_model.posterior_model.tokenizer,
+        "decoder_tokenizer": unsupervised_model.decoder_model.tokenizer
+    }
 
     set_seed(args)
 
