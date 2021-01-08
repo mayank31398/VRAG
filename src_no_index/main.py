@@ -16,7 +16,7 @@ from tqdm import tqdm, trange
 from transformers import AdamW, get_linear_schedule_with_warmup
 
 from .data import write_preds
-from .dataset import (DecoderDataset, KnowledgeWalker, PosteriorDataset,
+from .dataset import (DecoderDataset, PosteriorDataset,
                       PriorDataset, UnsupervisedDataset)
 from .models import DecoderModel, PosteriorModel, PriorModel, UnsupervisedModel
 from .scorer import Metrics
@@ -196,19 +196,12 @@ def main():
     parser.add_argument("--checkpoint", type=str, default="",
                         help="Saved checkpoint directory")
     parser.add_argument("--dataroot", type=str, help="Path to dataset.")
-    parser.add_argument("--knowledge_file", type=str,
-                        help="Path to knowledge file.")
-    parser.add_argument("--eval_dataset", type=str, default="val",
-                        help="Dataset to evaluate on, will load dataset from {dataroot}/{eval_dataset}")
     parser.add_argument("--labels_file", type=str, default=None,
                         help="If set, the labels will be loaded not from the default path, but from this file instead.")
     parser.add_argument("--output_file", type=str, default="",
                         help="Predictions will be written to this file.")
     parser.add_argument("--model_path", type=str,
                         help="Name of the experiment, checkpoints will be stored here")
-    parser.add_argument(
-        "--build_index", action="store_true", help="Build index")
-    parser.add_argument("--index_path", type=str, help="Path of the index")
     parser.add_argument("--n_gpus", type=int, default=1, help="Num GPUS")
     parser.add_argument("--dialog", action="store_true", help="dialog setting")
     args = parser.parse_args()
@@ -240,10 +233,8 @@ def main():
     # Set seed
     set_seed(args)
 
-    indexed_passages = KnowledgeWalker(args)
-
     args.batch_size = args.batch_size * args.n_gpus
-    unsupervised_model = UnsupervisedModel(args, indexed_passages).cuda()
+    unsupervised_model = UnsupervisedModel(args).cuda()
 
     if (args.n_gpus > 1):
         tokenizers = {

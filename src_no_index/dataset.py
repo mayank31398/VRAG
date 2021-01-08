@@ -16,88 +16,8 @@ from .data import pad_ids
 logger = logging.getLogger(__name__)
 
 
-def embed(documents, ctx_encoder, ctx_tokenizer):
-    input_ids = ctx_tokenizer(documents["title"], documents["text"],
-                              truncation=True, padding="longest", return_tensors="pt")["input_ids"]
-    embeddings = ctx_encoder(input_ids.cuda(), return_dict=True).pooler_output
-    return {"embeddings": embeddings.detach().cpu().numpy()}
-
-
-class KnowledgeWalker:
-    def __init__(self, args):
-        if (args.build_index):
-            dataset = load_dataset("json", data_files=[
-                args.knowledge_file], split="train")
-
-            # And compute the embeddings
-            ctx_encoder = DPRContextEncoder.from_pretrained(
-                args.document_encoder_model_name).cuda()
-            ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained(
-                args.document_encoder_model_name)
-
-            new_features = Features(
-                {
-                    "title": Value("string"),
-                    "text": Value("string"),
-                    "id": Value("int32"),
-                    "embeddings": Sequence(Value("float32"))
-                }
-            )  # optional, save as float32 instead of float64 to save space
-            dataset = dataset.map(
-                partial(embed, ctx_encoder=ctx_encoder,
-                        ctx_tokenizer=ctx_tokenizer),
-                batched=True,
-                batch_size=args.processing_args["batch_size"],
-                features=new_features
-            )
-
-            os.makedirs(os.path.join(args.index_path), exist_ok=True)
-            dataset.save_to_disk(os.path.join(args.index_path, "dataset"))
-
-            index = faiss.IndexHNSWFlat(
-                args.index_args["dimensions"], args.index_args["links"], faiss.METRIC_INNER_PRODUCT)
-            dataset.add_faiss_index("embeddings", custom_index=index)
-
-            dataset.get_index("embeddings").save(
-                os.path.join(args.index_path, "index.faiss"))
-
-            exit()
-        else:
-            logger.info("Loading index")
-            dataset = load_from_disk(os.path.join(args.index_path, "dataset"))
-            dataset.load_faiss_index("embeddings", os.path.join(
-                args.index_path, "index.faiss"))
-            self.dataset = dataset
-            logger.info("Index loaded")
-            self.inds = {}
-            for i, e in tqdm(enumerate(self.dataset)):
-                self.inds[e["text"]] = i
-
-    def retrieve(self, question_embeddings, topk):
-        question_embeddings = question_embeddings.detach().cpu().numpy()
-        retrievals = self.dataset.get_nearest_examples_batch(
-            'embeddings', question_embeddings, k=topk)
-
-        topk_documents_text = [i["text"] for i in retrievals.total_examples]
-        indices = []
-        for i in range(len(topk_documents_text)):
-            indices.append([])
-            for j in range(len(topk_documents_text[0])):
-                indices[i].append(self.inds[topk_documents_text[i][j]])
-
-        return indices
-
-    def get_field_by_indices(self, indices, field="text"):
-        results = []
-        for i in range(len(indices)):
-            results.append([])
-            for j in range(len(indices[0])):
-                results[i].append(self.dataset[indices[i][j]][field])
-        return results
-
-
 class DatasetWalker:
-    def __init__(self, args, split=None, labels_file=None):
+    def __init__(self, args, split=None, labels_file=None, embed=True):
         if (labels_file == None):
             if (split == "train"):
                 path = os.path.join(args.dataroot, "train.json")
@@ -111,6 +31,30 @@ class DatasetWalker:
         with open(path, "r") as f:
             self.dataset = json.load(f)
 
+        if (embed):
+            self.ctx_encoder = DPRContextEncoder.from_pretrained(
+                args.document_encoder_model_name).cuda()
+            self.ctx_tokenizer = DPRContextEncoderTokenizer.from_pretrained(
+                args.document_encoder_model_name)
+
+            for i in range(len(self.dataset)):
+                self.dataset[i] = self.embed(
+                    self.dataset[i], self.ctx_encoder, self.ctx_tokenizer)
+
+    def embed(self, example, ctx_encoder, ctx_tokenizer):
+        example["doc_embeddings"] = []
+        for i in example["docs"]:
+            input_ids = ctx_tokenizer(
+                i["title"], i["text"], truncation=True, return_tensors="pt")["input_ids"]
+            embeddings = ctx_encoder(
+                input_ids.cuda(), return_dict=True).pooler_output
+
+            example["doc_embeddings"].append(embeddings.detach().cpu().numpy())
+            example["doc_embeddings"] = np.concatenate(example["doc_embeddings"])
+
+        del example["docs"]
+        return example
+
     def __iter__(self):
         for example in self.dataset:
             yield example
@@ -123,10 +67,8 @@ class DatasetWalker:
 
 
 class BaseDataset(torch.utils.data.Dataset):
-    def __init__(self, args, tokenizer, split=None, labels_file=None):
+    def __init__(self, args, tokenizer, data_walker=None):
         self.tokenizer = tokenizer
-        self.dataset_walker = DatasetWalker(
-            args, split=split, labels_file=labels_file)
 
         self.cls = self.tokenizer.convert_tokens_to_ids(
             self.tokenizer.tokenize("[CLS]"))[0]
@@ -151,6 +93,7 @@ class BaseDataset(torch.utils.data.Dataset):
             y = i["response"]
             doc_id = i["doc_id"]
             qid = i["qid"]
+            doc_embeddings = i["doc_embeddings"]
 
             if (self.dialog):
                 x = i["dialog"]
@@ -175,6 +118,7 @@ class BaseDataset(torch.utils.data.Dataset):
             example = {
                 "x_ids": x_ids,
                 "y_ids": y_ids,
+                "doc_embeddings": doc_embeddings,
                 "doc_id": doc_id,
                 "qid": qid
             }
@@ -251,7 +195,7 @@ class DecoderDataset(BaseDataset):
     def __init__(self, args, tokenizer, split, labels_file=None):
         self.tokenizer = tokenizer
         self.dataset_walker = DatasetWalker(
-            args, split=split, labels_file=labels_file)
+            args, split=split, labels_file=labels_file, embed=False)
 
         self.speaker1, self.speaker2 = self.tokenizer.convert_tokens_to_ids(
             ["<speaker1>", "<speaker2>"])
@@ -330,10 +274,13 @@ class UnsupervisedDataset(torch.utils.data.Dataset):
         self.posterior_tokenizer = tokenizers["posterior_tokenizer"]
         self.decoder_tokenizer = tokenizers["decoder_tokenizer"]
 
+        self.dataset_walker = DatasetWalker(
+            args, split=split, labels_file=labels_file)
+
         self.prior_dataset = PriorDataset(
-            args, self.prior_tokenizer, split, labels_file=labels_file)
+            args, self.prior_tokenizer, data_walker=dataset_walker)
         self.posterior_dataset = PosteriorDataset(
-            args, self.posterior_tokenizer, split, labels_file=labels_file)
+            args, self.posterior_tokenizer, data_walker=dataset_walker)
         self.decoder_dataset = DecoderDataset(
             args, self.decoder_tokenizer, split, labels_file=labels_file)
 

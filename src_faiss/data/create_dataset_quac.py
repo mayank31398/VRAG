@@ -8,6 +8,15 @@ import numpy as np
 random.seed(42)
 
 
+def GetDialog(history, question):
+    l = []
+    for i in history:
+        l.append(i["question"])
+        l.append(i["answer"]["text"])
+    l.append(question)
+    return l
+
+
 def CreateDataset(dataset, docs={}, qid=0):
     l = []
     doc_id = len(docs)
@@ -36,7 +45,8 @@ def CreateDataset(dataset, docs={}, qid=0):
             "qid": qid,
             "doc_id": correct_doc_id,
             "query": rewrite,
-            "response": answer
+            "response": answer,
+            "dialog": GetDialog(history, question)
         }
         l.append(d)
         qid += 1
