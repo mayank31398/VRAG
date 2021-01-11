@@ -118,20 +118,22 @@ class PriorModel(nn.Module):
         self.indexed_passages = indexed_passages
 
     def forward(self, batch, topk):
-        # batch_size x sequence_length
+        # input_ids: batch_size x sequence_length
         input_ids = batch
 
-        # batch_size x 768
+        # question_embeddings: batch_size x 768
         question_embeddings = self.encoder(
             input_ids=input_ids[:, :self.max_length]).pooler_output
         retrieved_indices = self.indexed_passages.retrieve(
             question_embeddings, topk)
 
+        # topk_documents_embeddings: batch_size x topk x 768
         topk_documents_embeddings = self.indexed_passages.get_field_by_indices(
             retrieved_indices, "embeddings")
         topk_documents_embeddings = torch.tensor(
             topk_documents_embeddings).cuda()
 
+        # logits: batch_size x topk
         logits = torch.bmm(topk_documents_embeddings,
                            question_embeddings.unsqueeze(2)).squeeze(2)
 
@@ -180,21 +182,24 @@ class PosteriorModel(nn.Module):
     def forward(self, batch, topk):
         input_ids, token_type_ids = batch
 
-        # batch_size x sequence_length
+        # input_ids: batch_size x sequence_length
+        # token_type_ids: batch_size x sequence_length
         input_ids = input_ids.cuda()
         token_type_ids = token_type_ids.cuda()
 
-        # batch_size x 768
+        # question_embeddings: batch_size x 768
         question_embeddings = self.encoder(
             input_ids=input_ids[:, :self.max_length], token_type_ids=token_type_ids[:, :self.max_length]).pooler_output
         retrieved_indices = self.indexed_passages.retrieve(
             question_embeddings, topk)
 
+        # topk_documents_embeddings: batch_size x topk x 768
         topk_documents_embeddings = self.indexed_passages.get_field_by_indices(
             retrieved_indices, "embeddings")
         topk_documents_embeddings = torch.tensor(
             topk_documents_embeddings).cuda()
 
+        # logits: topk x 768
         logits = torch.bmm(topk_documents_embeddings,
                            question_embeddings.unsqueeze(2)).squeeze(2)
 
@@ -265,6 +270,9 @@ class DecoderModel(nn.Module):
         return input_ids
 
     def _prepare_inputs(self, decoder_input_ids, decoder_response_ids, topk_documents_text, with_eos=True):
+        # decoder_input_ids: batch_size x sequence_length
+        # decoder_response_ids: batch_size x sequence_length
+        # topk_documents_text: batch_size x topk x text_length
         batch_size = len(decoder_input_ids)
         topk = len(topk_documents_text[0])
 
@@ -301,6 +309,9 @@ class DecoderModel(nn.Module):
         list_lms = list_lms[:, :self.max_length]
         list_type_ids = list_type_ids[:, :self.max_length]
 
+        # decoder_input_ids: batch_size x topk x sequence_length
+        # decoder_response_ids: batch_size x topk x sequence_length
+        # decoder_token_type_ids: batch_size x topk x sequence_length
         decoder_input_ids = list_ids.reshape(batch_size, topk, -1)
         decoder_response_ids = list_lms.reshape(batch_size, topk, -1)
         decoder_token_type_ids = list_type_ids.reshape(batch_size, topk, -1)

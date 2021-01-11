@@ -142,6 +142,8 @@ class PriorModel(nn.Module):
         # batch_size x 768
         question_embeddings = self.encoder(
             input_ids=input_ids[:, :self.max_length]).pooler_output
+
+        topk = min(topk, document_embeddings.shape[1])
         logits, topk_documents_ids = retrieve(
             question_embeddings, document_embeddings, topk)
 
@@ -192,6 +194,8 @@ class PosteriorModel(nn.Module):
         # batch_size x 768
         question_embeddings = self.encoder(
             input_ids=input_ids[:, :self.max_length], token_type_ids=token_type_ids[:, :self.max_length]).pooler_output
+
+        topk = min(topk, document_embeddings.shape[1])
         logits, topk_documents_ids = retrieve(
             question_embeddings, document_embeddings, topk)
 

@@ -11,6 +11,7 @@ from nltk.translate.meteor_score import single_meteor_score
 from rouge import Rouge
 from sklearn.metrics import (accuracy_score, f1_score, precision_score,
                              recall_score)
+from tqdm import tqdm
 
 RE_ART = re.compile(r'\b(a|an|the)\b')
 RE_PUNC = re.compile(r'[!"#$%&()*+,-./:;<=>?@\[\]\\^`{|}~_\']')
@@ -186,12 +187,13 @@ def main():
     parser.add_argument("--output_file", type=str)
     parser.add_argument("--knowledge_file", type=str)
     parser.add_argument("--score_file", type=str)
+    parser.add_argument("--add_correct_document", action="store_true")
     args = parser.parse_args()
 
     predictions = json.load(open(args.output_file, "r"))
 
     metrics = Metrics()
-    for example in predictions:
+    for example in tqdm(predictions):
         metrics.update_selection(
             example["topk_documents_ids"], example["doc_id"])
         metrics.update_generation(
@@ -204,24 +206,26 @@ def main():
     for key in sorted(results.keys()):
         logger.info("  %s = %s", key, str(results[key]))
 
-    knowledge = {}
-    with jsonlines.open(args.knowledge_file, "r") as f:
-        for i in f.iter():
-            knowledge[i["id"]] = i
-            del knowledge[i["id"]]["id"]
+    if (args.add_correct_document):
+        knowledge = {}
+        with jsonlines.open(args.knowledge_file, "r") as f:
+            for i in f.iter():
+                knowledge[i["id"]] = i
+                del knowledge[i["id"]]["id"]
 
-    for i in range(len(predictions)):
-        if (predictions[i]["doc_id"] != None):
-            predictions[i]["correct_document"] = knowledge[predictions[i]["doc_id"]]
-        else:
-            predictions[i]["correct_document"] = None
+        for i in range(len(predictions)):
+            if (predictions[i]["doc_id"] != None):
+                predictions[i]["correct_document"] = knowledge[predictions[i]["doc_id"]]
+            else:
+                predictions[i]["correct_document"] = None
 
-        predictions[i]["topk_documents"] = []
-        for j in range(len(predictions[i]["topk_documents_ids"])):
-            predictions[i]["topk_documents"].append(
-                knowledge[predictions[i]["topk_documents_ids"][j]])
+            predictions[i]["topk_documents"] = []
+            for j in range(len(predictions[i]["topk_documents_ids"])):
+                predictions[i]["topk_documents"].append(
+                    knowledge[predictions[i]["topk_documents_ids"][j]])
 
-    json.dump(predictions, open(args.output_file, "w"), indent=4)
+        json.dump(predictions, open(args.output_file, "w"), indent=4)
+
     json.dump(results, open(args.score_file, "w"), indent=4)
 
 
