@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class Metrics():
-    def __init__(self, topk=None):
+    def __init__(self):
         self._selection_mrrk = []
         self._selection_r1 = []
         self._selection_rk = []
@@ -36,7 +36,6 @@ class Metrics():
         self._bleu4_from_k_docs = []
         self._ref_cannotanswer_from_k_docs = []
         self._hyp_cannotanswer_from_k_docs = []
-        self.topk = topk
 
         self._has_selection_scores = False
         self._has_generation_scores = False
@@ -81,16 +80,15 @@ class Metrics():
 
     def update_selection(self, topk_documents_ids, doc_id):
         self._has_selection_scores = True
-        if (self.topk == None):
-            self.topk = len(topk_documents_ids)
+        topk = len(topk_documents_ids)
 
         if (doc_id == None):
             return
 
         reciprocal_rank = self._reciprocal_rank(
-            topk_documents_ids, doc_id, k=self.topk)
+            topk_documents_ids, doc_id, k=topk)
         recall_1 = self._recall_at_k(topk_documents_ids, doc_id, k=1)
-        recall_k = self._recall_at_k(topk_documents_ids, doc_id, k=self.topk)
+        recall_k = self._recall_at_k(topk_documents_ids, doc_id, k=topk)
 
         self._selection_mrrk.append(reciprocal_rank)
         self._selection_r1.append(recall_1)
@@ -142,9 +140,9 @@ class Metrics():
         results = {}
         if (self._has_selection_scores):
             selection_scores = {
-                "mrr@" + str(self.topk): np.mean(self._selection_mrrk),
+                "mrr@k": np.mean(self._selection_mrrk),
                 "r@1": np.mean(self._selection_r1),
-                "r@" + str(self.topk): np.mean(self._selection_rk)
+                "r@k": np.mean(self._selection_rk)
             }
             results.update(selection_scores)
         if (self._has_generation_scores):

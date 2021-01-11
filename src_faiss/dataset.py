@@ -141,6 +141,8 @@ class BaseDataset(torch.utils.data.Dataset):
             self.speaker2 = self.tokenizer.convert_tokens_to_ids(
                 self.tokenizer.tokenize("<speaker2>"))[0]
 
+            self.num_turns = args.num_turns
+
         self.dialog = args.dialog
         self.examples = self._create_examples()
 
@@ -153,7 +155,7 @@ class BaseDataset(torch.utils.data.Dataset):
             qid = i["qid"]
 
             if (self.dialog):
-                x = i["dialog"]
+                x = i["dialog"][-self.num_turns:]
                 x_ids = None
                 for j, t in enumerate(x):
                     t = self.tokenizer.convert_tokens_to_ids(
@@ -257,6 +259,8 @@ class DecoderDataset(BaseDataset):
             ["<speaker1>", "<speaker2>"])
 
         self.dialog = args.dialog
+        if (self.dialog):
+            self.num_turns = args.num_turns
         self.examples = self._create_examples()
 
     def _create_examples(self):
@@ -268,7 +272,7 @@ class DecoderDataset(BaseDataset):
             qid = i["qid"]
 
             if (self.dialog):
-                x = i["dialog"]
+                x = i["dialog"][-self.num_turns:]
                 x_ids = None
                 for j, t in enumerate(x):
                     t = self.tokenizer.convert_tokens_to_ids(

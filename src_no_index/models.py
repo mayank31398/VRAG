@@ -136,7 +136,6 @@ class PriorModel(nn.Module):
                         args.question_encoder_model_name)
 
     def forward(self, batch, topk):
-        # batch_size x sequence_length
         input_ids, document_embeddings = batch
 
         # batch_size x 768
@@ -188,7 +187,6 @@ class PosteriorModel(nn.Module):
                         args.question_encoder_model_name)
 
     def forward(self, batch, topk):
-        # batch_size x sequence_length
         input_ids, token_type_ids, document_embeddings = batch
 
         # batch_size x 768
