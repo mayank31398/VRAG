@@ -449,18 +449,17 @@ class UnsupervisedModel(nn.Module):
         samples = []
         for _ in range(num_samples):
             s = torch.distributions.categorical.Categorical(
-                dist).sample().unsqueeze(1)
+                dist).sample().tolist()
             samples.append(s)
-        samples = torch.cat(samples, dim=1)
+        samples = torch.tensor(samples).T.tolist()
         return samples
 
     def SelectByIndices(self, x, indices):
         l = []
-        for i in range(indices.shape[0]):
+        for i in range(len(indices)):
             l.append([])
-            for j in range(indices.shape[1]):
+            for j in range(len(indices[0])):
                 l[-1].append(x[i][indices[i][j]])
-        l = torch.tensor(l)
         return l
 
     def forward(self, batch):
@@ -605,6 +604,8 @@ class UnsupervisedModel(nn.Module):
             prior_sampled_indices = self.SelectByIndices(prior_indices, tmp)
             # prior_sampled_dist: batch_size x num_samples
             prior_sampled_dist = self.SelectByIndices(prior_dist, tmp)
+            prior_sampled_dist = torch.stack(
+                [torch.stack(i) for i in prior_sampled_dist])
 
             if (self.parallel):
                 prior_sampled_documents_text = self.prior_model.module.indexed_passages.get_field_by_indices(
@@ -615,9 +616,9 @@ class UnsupervisedModel(nn.Module):
                 decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model.module._prepare_inputs(
                     decoder_input_ids, decoder_response_ids, prior_sampled_documents_text)
             else:
-                prior_sampled_documents_text = self.prior_model.module.indexed_passages.get_field_by_indices(
-                    prior_sampled_indices, "text")
                 prior_sampled_documents_text = self.prior_model.indexed_passages.get_field_by_indices(
+                    prior_sampled_indices, "text")
+                prior_sampled_documents_ids = self.prior_model.indexed_passages.get_field_by_indices(
                     prior_sampled_indices, "id")
 
                 decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model._prepare_inputs(
@@ -628,7 +629,7 @@ class UnsupervisedModel(nn.Module):
                 [decoder_input_ids_, decoder_response_ids_])
 
             loss = decoder_loss + decoder_loss.detach() * torch.log(prior_sampled_dist)
-            loss = e.mean()
+            loss = loss.mean()
 
             print("loss =", loss)
             print("decoder_loss =", decoder_loss)

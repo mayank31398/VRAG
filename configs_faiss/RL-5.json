@@ -10,7 +10,7 @@
     "num_train_epochs": 10,
     "seed": 2021,
     "topk": 100,
-    "divide": 5,
+    "divide": 1,
     "num_samples": 5,
     "batch_size": 1,
     "warmup_steps": 0,
