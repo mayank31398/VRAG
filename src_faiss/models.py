@@ -231,7 +231,7 @@ class DecoderModel(nn.Module):
         }
         self.SPECIAL_TOKENS_VALUES = [
             "<bos>", "<eos>", "<pad>", "<speaker1>", "<speaker2>"]
-        self.max_length = 1024
+        self.max_length = 512
         self.divide = args.divide
 
         if (args.eval_only and args.model_path != None):
@@ -429,6 +429,9 @@ class UnsupervisedModel(nn.Module):
         self.modeling_method = args.modeling_method
         if (self.modeling_method == "VRAG"):
             self.kl_beta = args.kl_beta
+        elif (self.modeling_method == "RL"):
+            self.num_samples = args.num_samples
+
         self.topk = args.topk
         self.prior_model = PriorModel(args, indexed_passages)
         self.posterior_model = PosteriorModel(args, indexed_passages)
@@ -441,6 +444,24 @@ class UnsupervisedModel(nn.Module):
             self.parallel = True
         else:
             self.parallel = False
+
+    def SampleCategorical(self, dist, num_samples):
+        samples = []
+        for _ in range(num_samples):
+            s = torch.distributions.categorical.Categorical(
+                dist).sample().unsqueeze(1)
+            samples.append(s)
+        samples = torch.cat(samples, dim=1)
+        return samples
+
+    def SelectByIndices(self, x, indices):
+        l = []
+        for i in range(indices.shape[0]):
+            l.append([])
+            for j in range(indices.shape[1]):
+                l[-1].append(x[i][indices[i][j]])
+        l = torch.tensor(l)
+        return l
 
     def forward(self, batch):
         (prior_input_ids,
@@ -564,6 +585,55 @@ class UnsupervisedModel(nn.Module):
             print("e =", e)
             print("topk_documents_ids =",
                   posterior_model_outputs["topk_documents_ids"])
+            print("doc_ids =", doc_ids)
+            print("q_ids =", q_ids)
+            print()
+
+            return loss
+        elif (self.modeling_method == "RL"):
+            prior_logits, prior_indices, prior_question_embeddings = self.prior_model(
+                prior_input_ids.cuda(), self.topk)
+
+            prior_indices = prior_indices.cpu().tolist()
+            # prior_dist: batch_size x topk
+            prior_dist = F.softmax(prior_logits, dim=-1) + EPSILON
+
+            # NOTE tmp is not the same as prior_indices
+            tmp = self.SampleCategorical(prior_dist, self.num_samples)
+
+            # prior_sampled_indices: batch_size x num_samples
+            prior_sampled_indices = self.SelectByIndices(prior_indices, tmp)
+            # prior_sampled_dist: batch_size x num_samples
+            prior_sampled_dist = self.SelectByIndices(prior_dist, tmp)
+
+            if (self.parallel):
+                prior_sampled_documents_text = self.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_sampled_indices, "text")
+                prior_sampled_documents_ids = self.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_sampled_indices, "id")
+
+                decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model.module._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, prior_sampled_documents_text)
+            else:
+                prior_sampled_documents_text = self.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_sampled_indices, "text")
+                prior_sampled_documents_text = self.prior_model.indexed_passages.get_field_by_indices(
+                    prior_sampled_indices, "id")
+
+                decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, prior_sampled_documents_text)
+
+            # decoder_loss: batch_size x num_samples
+            decoder_loss, _ = self.decoder_model(
+                [decoder_input_ids_, decoder_response_ids_])
+
+            loss = decoder_loss + decoder_loss.detach() * torch.log(prior_sampled_dist)
+            loss = e.mean()
+
+            print("loss =", loss)
+            print("decoder_loss =", decoder_loss)
+            print("prior_sampled_dist =", prior_sampled_dist)
+            print("prior_sampled_documents_ids =", prior_sampled_documents_ids)
             print("doc_ids =", doc_ids)
             print("q_ids =", q_ids)
             print()

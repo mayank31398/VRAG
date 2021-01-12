@@ -90,6 +90,9 @@ def Train(args, train_dataset, eval_dataset, model):
                 local_steps += 1
                 epoch_iterator.set_postfix(Loss=tr_loss / (local_steps + 1))
 
+            if (args.save_every != 0 and global_step % args.save_every == 0):
+                model.save_model(args, "checkpoint-" + str(global_step))
+
         results = Evaluate(args, eval_dataset, model)
 
         logger.info("***** Eval results *****")
@@ -211,6 +214,7 @@ def main():
     parser.add_argument("--index_path", type=str, help="Path of the index")
     parser.add_argument("--n_gpus", type=int, default=1, help="Num GPUS")
     parser.add_argument("--dialog", action="store_true", help="dialog setting")
+    parser.add_argument("--save_every", type=int, help="save every nth step", default=0)
     args = parser.parse_args()
 
     # Setup logging
