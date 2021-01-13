@@ -42,7 +42,7 @@ def Train(args, train_dataset, eval_dataset, model):
     t_total = len(
         train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
-    optimizer = AdamW(model.parameters(),
+    optimizer = AdamW(model.GetParameters(),
                       lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=t_total
@@ -133,7 +133,7 @@ def Evaluate(args, eval_dataset, model):
         model.eval()
 
         for batch in epoch_iterator:
-            prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids = batch
+            prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids, has_cannot_answer = batch
 
             prior_logits, prior_indices, _ = model.prior_model(
                 prior_input_ids.cuda(), args.topk)
@@ -166,19 +166,19 @@ def Evaluate(args, eval_dataset, model):
                 if (args.n_gpus > 1):
                     output_text_from_1_doc = model.decoder_model.module.generate_from_1_doc(
                         args, decoder_input_ids, best_document_text)
-                    output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
-                        args, decoder_input_ids, prior_topk_documents_text, prior_dist)
+                    # output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
+                    #     args, decoder_input_ids, prior_topk_documents_text, prior_dist)
                 else:
                     output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
                         args, decoder_input_ids, best_document_text)
-                    output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
-                        args, decoder_input_ids, prior_topk_documents_text, prior_dist)
+                    # output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
+                    #     args, decoder_input_ids, prior_topk_documents_text, prior_dist)
 
                 d[q_ids] = {
                     "prior_dist": prior_dist,
                     "topk_documents_ids": prior_topk_documents_ids,
                     "generated_response_from_1_doc": output_text_from_1_doc,
-                    "generated_response_from_k_docs": output_text_from_k_docs
+                    # "generated_response_from_k_docs": output_text_from_k_docs
                 }
 
     if (args.eval_only):
@@ -191,7 +191,6 @@ def Evaluate(args, eval_dataset, model):
 def main():
     parser = argparse.ArgumentParser()
 
-    # Required parameters
     parser.add_argument("--params_file", type=str,
                         help="JSON configuration file")
     parser.add_argument("--eval_only", action="store_true",
@@ -215,6 +214,7 @@ def main():
     parser.add_argument("--n_gpus", type=int, default=1, help="Num GPUS")
     parser.add_argument("--dialog", action="store_true", help="dialog setting")
     parser.add_argument("--save_every", type=int, help="save every nth step", default=0)
+    parser.add_argument("--multitask", action="store_true", help="Use multitask decoder")
     args = parser.parse_args()
 
     # Setup logging

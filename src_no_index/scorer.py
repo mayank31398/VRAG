@@ -61,22 +61,22 @@ class Metrics():
         return 0
 
     def _bleu(self, ref_tokens, hyp_tokens, n=4):
-        if (ref_tokens == ['cannotanswer']):
-            if (hyp_tokens == ['cannotanswer']):
-                return 1
-            else:
-                return 0
+        # if (ref_tokens == ['cannotanswer']):
+        #     if (hyp_tokens == ['cannotanswer']):
+        #         return 1
+        #     else:
+        #         return 0
+        # else:
+        if (hyp_tokens == ['cannotanswer']):
+            return 0
         else:
-            if (hyp_tokens == ['cannotanswer']):
+            if (len(hyp_tokens) == 0):
                 return 0
-            else:
-                if (len(hyp_tokens) == 0):
-                    return 0
 
-                weights = [1 / n] * n
-                score = sentence_bleu([ref_tokens], hyp_tokens, weights)
+            weights = [1 / n] * n
+            score = sentence_bleu([ref_tokens], hyp_tokens, weights)
 
-                return score
+            return score
 
     def update_selection(self, topk_documents_ids, doc_id):
         self._has_selection_scores = True
@@ -120,21 +120,22 @@ class Metrics():
             else:
                 self._hyp_cannotanswer_from_k_docs.append(0)
 
-        bleu1 = self._bleu(ref_tokens, hyp_tokens, n=1)
-        bleu2 = self._bleu(ref_tokens, hyp_tokens, n=2)
-        bleu3 = self._bleu(ref_tokens, hyp_tokens, n=3)
-        bleu4 = self._bleu(ref_tokens, hyp_tokens, n=4)
+        if (ref_tokens != ["cannotanswer"]):
+            bleu1 = self._bleu(ref_tokens, hyp_tokens, n=1)
+            bleu2 = self._bleu(ref_tokens, hyp_tokens, n=2)
+            bleu3 = self._bleu(ref_tokens, hyp_tokens, n=3)
+            bleu4 = self._bleu(ref_tokens, hyp_tokens, n=4)
 
-        if (num_docs == 1):
-            self._bleu1_from_1_doc.append(bleu1)
-            self._bleu2_from_1_doc.append(bleu2)
-            self._bleu3_from_1_doc.append(bleu3)
-            self._bleu4_from_1_doc.append(bleu4)
-        else:
-            self._bleu1_from_k_docs.append(bleu1)
-            self._bleu2_from_k_docs.append(bleu2)
-            self._bleu3_from_k_docs.append(bleu3)
-            self._bleu4_from_k_docs.append(bleu4)
+            if (num_docs == 1):
+                self._bleu1_from_1_doc.append(bleu1)
+                self._bleu2_from_1_doc.append(bleu2)
+                self._bleu3_from_1_doc.append(bleu3)
+                self._bleu4_from_1_doc.append(bleu4)
+            else:
+                self._bleu1_from_k_docs.append(bleu1)
+                self._bleu2_from_k_docs.append(bleu2)
+                self._bleu3_from_k_docs.append(bleu3)
+                self._bleu4_from_k_docs.append(bleu4)
 
     def scores(self):
         results = {}

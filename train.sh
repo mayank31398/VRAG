@@ -2,9 +2,9 @@
 # QUAC
 mkdir -p "logs_quac"
 
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac/RAG-5-err.log" -out "logs_quac/RAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/RAG-5" --index_path "runs_quac"
+jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac/RAG-5-err.log" -out "logs_quac/RAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/RAG-5" --index_path "runs_quac" --multitask
 
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac/VRAG-5-err.log" -out "logs_quac/VRAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/VRAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/VRAG-5" --index_path "runs_quac"
+jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac/VRAG-5-err.log" -out "logs_quac/VRAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/VRAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/VRAG-5" --index_path "runs_quac" --multitask
 
 jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac/RL-5-err.log" -out "logs_quac/RL-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RL-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/RL-5" --index_path "runs_quac"
 # ==============================================================================
@@ -14,9 +14,9 @@ jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac/RL-5-err.lo
 # QUAC dialog
 mkdir -p "logs_quac_dialog"
 
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac_dialog/RAG-5-err.log" -out "logs_quac_dialog/RAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/RAG-5" --index_path "runs_quac" --dialog
+jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac_dialog/RAG-5-err.log" -out "logs_quac_dialog/RAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/RAG-5" --index_path "runs_quac" --dialog --multitask
 
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac_dialog/VRAG-5-err.log" -out "logs_quac_dialog/VRAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/VRAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/VRAG-5" --index_path "runs_quac" --dialog
+jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac_dialog/VRAG-5-err.log" -out "logs_quac_dialog/VRAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/VRAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/VRAG-5" --index_path "runs_quac" --dialog --multitask
 
 jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac_dialog/RL-5-err.log" -out "logs_quac_dialog/RL-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RL-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/RL-5" --index_path "runs_quac" --dialog
 # ==============================================================================

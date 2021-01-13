@@ -154,6 +154,10 @@ class BaseDataset(torch.utils.data.Dataset):
             doc_id = i["doc_id"]
             qid = i["qid"]
 
+            has_cannot_answer = 0
+            if (y == "CANNOTANSWER"):
+                has_cannot_answer = 1
+
             if (self.dialog):
                 x = i["dialog"][-self.num_turns:]
                 x_ids = None
@@ -178,7 +182,8 @@ class BaseDataset(torch.utils.data.Dataset):
                 "x_ids": x_ids,
                 "y_ids": y_ids,
                 "doc_id": doc_id,
-                "qid": qid
+                "qid": qid,
+                "has_cannot_answer": has_cannot_answer
             }
             examples.append(example)
 
@@ -353,7 +358,8 @@ class UnsupervisedDataset(torch.utils.data.Dataset):
             "decoder_input_ids": decoder_example["input_ids"],
             "decoder_response_ids": decoder_example["response_ids"],
             "doc_id": prior_example["example"]["doc_id"],
-            "qid": prior_example["example"]["qid"]
+            "qid": prior_example["example"]["qid"],
+            "has_cannot_answer": prior_example["example"]["has_cannot_answer"]
         }
         return d
 
@@ -378,7 +384,10 @@ class UnsupervisedDataset(torch.utils.data.Dataset):
         doc_ids = [x["doc_id"] for x in batch]
         q_ids = [x["qid"] for x in batch]
 
-        return prior_input_ids, posterior_input_ids, posterior_token_type_ids, decoder_input_ids, decoder_response_ids, doc_ids, q_ids
+        has_cannot_answer = [x["has_cannot_answer"] for x in batch]
+        has_cannot_answer = torch.tensor(has_cannot_answer)
+
+        return prior_input_ids, posterior_input_ids, posterior_token_type_ids, decoder_input_ids, decoder_response_ids, doc_ids, q_ids, has_cannot_answer
 
     def __len__(self):
         return len(self.prior_dataset)
