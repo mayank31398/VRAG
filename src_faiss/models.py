@@ -405,7 +405,6 @@ class DecoderModel(nn.Module):
 
         lm_logits = decoder_model_outputs[0]
         lm_logits = lm_logits.reshape(batch_size, topk, sequence_length, -1)
-        # FIXME divide parameter
         lm_logits = lm_logits / self.divide
 
         loss = self.compute_gen_loss_item(lm_logits, decoder_response_ids)
@@ -414,7 +413,6 @@ class DecoderModel(nn.Module):
             return loss, lm_logits, classification_logits
         return loss, lm_logits
 
-    # NOTE only works with batch size 1
     def generate_from_1_doc(self,
                             args,
                             decoder_input_ids,
@@ -436,7 +434,7 @@ class DecoderModel(nn.Module):
             x = x.unsqueeze(0).unsqueeze(0)
 
             classification_logits = self.Classify(x)
-            if (classification_logits > 0.5):
+            if (classification_logits > 0):
                 output_text = "CANNOTANSWER"
 
         if (output_text == None):
@@ -463,36 +461,35 @@ class DecoderModel(nn.Module):
 
         return output_text
 
-    # # NOTE only works with batch size 1
-    # def generate_from_k_docs(self,
-    #                          args,
-    #                          decoder_input_ids,
-    #                          topk_documents_decoder_text,
-    #                          prior_dist,
-    #                          multitask=False):
-    #     p_y_given_zx = []
-    #     output_text = None
-    #     p_max = 0
-    #     for i in range(len(prior_dist)):
-    #         text_, decoder_response_ids = self.generate_from_1_doc(
-    #             args, decoder_input_ids, topk_documents_decoder_text[i], return_ids=True)
+    def generate_from_k_docs(self,
+                             args,
+                             decoder_input_ids,
+                             topk_documents_decoder_text,
+                             prior_dist,
+                             multitask=False):
+        p_y_given_zx = []
+        output_text = None
+        p_max = 0
+        for i in range(len(prior_dist)):
+            text_, decoder_response_ids = self.generate_from_1_doc(
+                args, decoder_input_ids, topk_documents_decoder_text[i], return_ids=True)
 
-    #         x = self._prepare_inputs([decoder_input_ids], [decoder_response_ids], [
-    #                                  [topk_documents_decoder_text[i]]], with_eos=False, multitask=multitask)
-    #         if (multitask):
-    #             decoder_input_ids_, decoder_response_ids_, _, _ = x
-    #         else:
-    #             decoder_input_ids_, decoder_response_ids_, _ = x
+            x = self._prepare_inputs([decoder_input_ids], [decoder_response_ids], [
+                                     [topk_documents_decoder_text[i]]], with_eos=False, multitask=multitask)
+            if (multitask):
+                decoder_input_ids_, decoder_response_ids_, _, _ = x
+            else:
+                decoder_input_ids_, decoder_response_ids_, _ = x
 
-    #         decoder_loss, _ = self([decoder_input_ids_, decoder_response_ids_])
+            decoder_loss, _ = self([decoder_input_ids_, decoder_response_ids_])
 
-    #         p_y_given_zx = torch.exp(-decoder_loss).squeeze().cpu().numpy()
-    #         p_y_given_x = p_y_given_zx * prior_dist[i]
-    #         if (p_y_given_x > p_max):
-    #             p_max = p_y_given_x
-    #             output_text = text_
+            p_y_given_zx = torch.exp(-decoder_loss).squeeze().cpu().numpy()
+            p_y_given_x = p_y_given_zx * prior_dist[i]
+            if (p_y_given_x > p_max):
+                p_max = p_y_given_x
+                output_text = text_
 
-    #     return output_text
+        return output_text
 
     def save_model(self, args, model_name):
         output_dir = os.path.join(args.model_path, "decoder", model_name)
@@ -523,6 +520,10 @@ class UnsupervisedModel(nn.Module):
         self.posterior_model = PosteriorModel(args, indexed_passages)
         self.decoder_model = DecoderModel(args)
         self.multitask = args.multitask
+        self.weigh_cannot_answer = args.weigh_cannot_answer
+        if (self.weigh_cannot_answer):
+            self.weight = args.weight
+        self.fix_DPR = args.fix_DPR
 
         if (args.n_gpus > 1):
             self.prior_model = nn.DataParallel(self.prior_model)
@@ -565,6 +566,7 @@ class UnsupervisedModel(nn.Module):
             p_z_given_x = F.softmax(prior_logits, dim=-1) + EPSILON
 
             prior_indices = prior_indices.cpu().tolist()
+            has_cannot_answer = has_cannot_answer.cuda()
 
             if (self.parallel):
                 prior_topk_documents_text = self.prior_model.module.indexed_passages.get_field_by_indices(
@@ -602,7 +604,6 @@ class UnsupervisedModel(nn.Module):
 
                 classification_logits = classification_logits.reshape(b_ * k_)
 
-                has_cannot_answer = has_cannot_answer.cuda()
                 has_cannot_answer_ = has_cannot_answer.repeat(
                     1, k_).reshape(b_ * k_)
 
@@ -621,6 +622,8 @@ class UnsupervisedModel(nn.Module):
             if (self.multitask):
                 loss = loss * (1 - has_cannot_answer) + classification_loss
 
+            if (self.weigh_cannot_answer):
+                loss += (1 - has_cannot_answer) * (self.weight - 1) * loss
             loss = loss.mean()
 
             print("loss =", loss)
@@ -652,7 +655,7 @@ class UnsupervisedModel(nn.Module):
                     prior_indices, "embeddings")
 
                 x = self.decoder_model.module._prepare_inputs(
-                    decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+                    decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
 
                 if (self.multitask):
                     decoder_input_ids_, decoder_response_ids_, _, cls_index = x
@@ -672,7 +675,7 @@ class UnsupervisedModel(nn.Module):
                     prior_indices, "embeddings")
 
                 x = self.decoder_model._prepare_inputs(
-                    decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+                    decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
 
                 if (self.multitask):
                     decoder_input_ids_, decoder_response_ids_, _, cls_index = x
@@ -707,6 +710,9 @@ class UnsupervisedModel(nn.Module):
 
             if (self.multitask):
                 loss = loss * (1 - has_cannot_answer) + classification_loss
+
+            if (self.weigh_cannot_answer):
+                loss += (1 - has_cannot_answer) * (self.weight - 1) * loss
 
             loss = loss.mean()
 
@@ -809,6 +815,9 @@ class UnsupervisedModel(nn.Module):
             self.decoder_model.save_model(args, model_name)
 
     def GetParameters(self):
+        if (self.fix_DPR):
+            return list(self.decoder_model.parameters())
+
         params = list(self.prior_model.parameters()) + \
             list(self.decoder_model.parameters())
         if (self.modeling_method == "VRAG"):

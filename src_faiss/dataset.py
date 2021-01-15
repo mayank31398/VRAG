@@ -144,6 +144,7 @@ class BaseDataset(torch.utils.data.Dataset):
             self.num_turns = args.num_turns
 
         self.dialog = args.dialog
+        self.skip_cannot_answer = args.skip_cannot_answer
         self.examples = self._create_examples()
 
     def _create_examples(self):
@@ -157,6 +158,8 @@ class BaseDataset(torch.utils.data.Dataset):
             has_cannot_answer = 0
             if (y == "CANNOTANSWER"):
                 has_cannot_answer = 1
+                if (self.skip_cannot_answer):
+                    continue
 
             if (self.dialog):
                 x = i["dialog"][-self.num_turns:]
@@ -264,6 +267,7 @@ class DecoderDataset(BaseDataset):
             ["<speaker1>", "<speaker2>"])
 
         self.dialog = args.dialog
+        self.skip_cannot_answer = args.skip_cannot_answer
         if (self.dialog):
             self.num_turns = args.num_turns
         self.examples = self._create_examples()
@@ -275,6 +279,9 @@ class DecoderDataset(BaseDataset):
             y = i["response"]
             doc_id = i["doc_id"]
             qid = i["qid"]
+
+            if (self.skip_cannot_answer and y == "CANNOTANSWER"):
+                continue
 
             if (self.dialog):
                 x = i["dialog"][-self.num_turns:]

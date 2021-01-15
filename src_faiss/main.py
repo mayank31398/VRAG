@@ -166,19 +166,19 @@ def Evaluate(args, eval_dataset, model):
                 if (args.n_gpus > 1):
                     output_text_from_1_doc = model.decoder_model.module.generate_from_1_doc(
                         args, decoder_input_ids, best_document_text)
-                    # output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
-                    #     args, decoder_input_ids, prior_topk_documents_text, prior_dist)
+                    output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
+                        args, decoder_input_ids, prior_topk_documents_text, prior_dist)
                 else:
                     output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
                         args, decoder_input_ids, best_document_text)
-                    # output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
-                    #     args, decoder_input_ids, prior_topk_documents_text, prior_dist)
+                    output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
+                        args, decoder_input_ids, prior_topk_documents_text, prior_dist)
 
                 d[q_ids] = {
                     "prior_dist": prior_dist,
                     "topk_documents_ids": prior_topk_documents_ids,
                     "generated_response_from_1_doc": output_text_from_1_doc,
-                    # "generated_response_from_k_docs": output_text_from_k_docs
+                    "generated_response_from_k_docs": output_text_from_k_docs
                 }
 
     if (args.eval_only):
@@ -213,8 +213,18 @@ def main():
     parser.add_argument("--index_path", type=str, help="Path of the index")
     parser.add_argument("--n_gpus", type=int, default=1, help="Num GPUS")
     parser.add_argument("--dialog", action="store_true", help="dialog setting")
-    parser.add_argument("--save_every", type=int, help="save every nth step", default=0)
-    parser.add_argument("--multitask", action="store_true", help="Use multitask decoder")
+    parser.add_argument("--save_every", type=int,
+                        help="save every nth step", default=0)
+    parser.add_argument("--multitask", action="store_true",
+                        help="Use multitask decoder")
+    parser.add_argument("--weight", type=int,
+                        help="weight for CANNOTANSWER", default=5)
+    parser.add_argument("--weigh_cannot_answer",
+                        action="store_true", help="use weight parameter")
+    parser.add_argument("--skip_cannot_answer",
+                        action="store_true", help="skip CANNOTANSWER")
+    parser.add_argument("--fix_DPR", action="store_true",
+                        help="fix DPR model weights")
     args = parser.parse_args()
 
     # Setup logging
