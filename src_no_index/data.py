@@ -39,23 +39,13 @@ def write_preds(eval_dataset, output_file, d):
     for example in eval_dataset.prior_dataset.dataset_walker:
         l.append(example)
         l[-1].update(d[example["qid"]])
+        del l[-1]["doc_embeddings"]
 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     logger.info("Writing predictions to {}".format(output_file))
 
     with open(output_file, "w") as jsonfile:
         json.dump(l, jsonfile, indent=4)
-
-
-# def write_preds(eval_dataset, output_file, d):
-#     for example in eval_dataset.prior_dataset.dataset_walker:
-#         d[example["qid"]].update(example)
-
-#     os.makedirs(os.path.dirname(output_file), exist_ok=True)
-#     logger.info("Writing predictions to {}".format(output_file))
-
-#     with open(output_file, "w") as jsonfile:
-#         json.dump(d, jsonfile, indent=4)
 
 
 def pad_ids(arrays, padding, max_length=-1):

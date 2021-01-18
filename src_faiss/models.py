@@ -105,6 +105,12 @@ class PriorModel(nn.Module):
                 args.model_path, "prior", args.checkpoint), config=self.config)
             logger.info("Loading prior model from %s", os.path.join(
                 args.model_path, "prior", args.checkpoint))
+        elif (args.prior_path != None):
+            self.config = AutoConfig.from_pretrained(args.prior_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(args.prior_path)
+            self.encoder = DPRQuestionEncoder.from_pretrained(
+                args.prior_path, config=self.config)
+            logger.info("Loading prior model from %s", args.prior_path)
         else:
             self.config = AutoConfig.from_pretrained(
                 args.question_encoder_model_name)
@@ -167,6 +173,12 @@ class PosteriorModel(nn.Module):
                 args.model_path, "posterior", args.checkpoint), config=self.config)
             logger.info("Loading posterior model from %s", os.path.join(
                 args.model_path, "posterior", args.checkpoint))
+        elif (args.posterior_path != None):
+            self.config = AutoConfig.from_pretrained(args.posterior_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(args.posterior_path)
+            self.encoder = DPRQuestionEncoder.from_pretrained(
+                args.posterior_path, config=self.config)
+            logger.info("Loading posterior model from %s", args.posterior_path)
         else:
             self.config = AutoConfig.from_pretrained(
                 args.question_encoder_model_name)
@@ -243,6 +255,12 @@ class DecoderModel(nn.Module):
                 args.model_path, "decoder", args.checkpoint), config=self.config)
             logger.info("Loading decoder model from %s", os.path.join(
                 args.model_path, "decoder", args.checkpoint))
+        elif (args.decoder_path != None):
+            self.config = AutoConfig.from_pretrained(args.decoder_path)
+            self.tokenizer = AutoTokenizer.from_pretrained(args.decoder_path)
+            self.decoder = GPT2LMHeadModel.from_pretrained(
+                args.decoder_path, config=self.config)
+            logger.info("Loading decoder model from %s", args.decoder_path)
         else:
             self.config = AutoConfig.from_pretrained(args.decoder_model_name)
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -438,7 +456,7 @@ class DecoderModel(nn.Module):
                 output_text = "CANNOTANSWER"
 
         if (output_text == None):
-            decoder_input_ids_, _, _, _ = self._prepare_inputs(
+            decoder_input_ids_, _, _ = self._prepare_inputs(
                 [decoder_input_ids], [[]], [[best_document_decoder_text]], with_eos=False)
             decoder_input_ids_ = decoder_input_ids_.squeeze(1).cuda()
 
@@ -465,23 +483,25 @@ class DecoderModel(nn.Module):
                              args,
                              decoder_input_ids,
                              topk_documents_decoder_text,
-                             prior_dist,
-                             multitask=False):
+                             prior_dist):
         p_y_given_zx = []
         output_text = None
-        p_max = 0
+        p_max = -1
         for i in range(len(prior_dist)):
-            text_, decoder_response_ids = self.generate_from_1_doc(
-                args, decoder_input_ids, topk_documents_decoder_text[i], return_ids=True)
+            text_ = self.generate_from_1_doc(
+                args, decoder_input_ids, topk_documents_decoder_text[i])
 
+            decoder_response_ids = self.tokenizer.convert_tokens_to_ids(
+                self.tokenizer.tokenize(text_))
             x = self._prepare_inputs([decoder_input_ids], [decoder_response_ids], [
-                                     [topk_documents_decoder_text[i]]], with_eos=False, multitask=multitask)
-            if (multitask):
+                                     [topk_documents_decoder_text[i]]], with_eos=False)
+            if (self.multitask):
                 decoder_input_ids_, decoder_response_ids_, _, _ = x
             else:
                 decoder_input_ids_, decoder_response_ids_, _ = x
 
-            decoder_loss, _ = self([decoder_input_ids_, decoder_response_ids_])
+            decoder_loss, _ = self(
+                [decoder_input_ids_.cuda(), decoder_response_ids_.cuda()])
 
             p_y_given_zx = torch.exp(-decoder_loss).squeeze().cpu().numpy()
             p_y_given_x = p_y_given_zx * prior_dist[i]
@@ -560,13 +580,14 @@ class UnsupervisedModel(nn.Module):
          q_ids,
          has_cannot_answer) = batch
 
+        has_cannot_answer = has_cannot_answer.cuda()
+
         if (self.modeling_method == "RAG"):
             prior_logits, prior_indices, _ = self.prior_model(
                 prior_input_ids.cuda(), self.topk)
             p_z_given_x = F.softmax(prior_logits, dim=-1) + EPSILON
 
             prior_indices = prior_indices.cpu().tolist()
-            has_cannot_answer = has_cannot_answer.cuda()
 
             if (self.parallel):
                 prior_topk_documents_text = self.prior_model.module.indexed_passages.get_field_by_indices(

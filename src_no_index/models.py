@@ -348,8 +348,10 @@ class DecoderModel(nn.Module):
 
         return loss, lm_logits
 
-    # NOTE only works with batch size 1
-    def generate_from_1_doc(self, args, decoder_input_ids, best_document_decoder_text, return_ids=False):
+    def generate_from_1_doc(self,
+                            args,
+                            decoder_input_ids,
+                            best_document_decoder_text):
         decoder_input_ids_, _, _ = self._prepare_inputs(
             [decoder_input_ids], [[]], [[best_document_decoder_text]], with_eos=False)
         decoder_input_ids_ = decoder_input_ids_.squeeze(1).cuda()
@@ -371,22 +373,27 @@ class DecoderModel(nn.Module):
         output_text = self.tokenizer.decode(
             output, skip_special_tokens=True)
 
-        if (return_ids):
-            return output_text, output.cpu().numpy().tolist()
         return output_text
 
-    # NOTE only works with batch size 1
-    def generate_from_k_docs(self, args, decoder_input_ids, topk_documents_decoder_text, prior_dist):
+    def generate_from_k_docs(self,
+                             args,
+                             decoder_input_ids,
+                             topk_documents_decoder_text,
+                             prior_dist):
         p_y_given_zx = []
         output_text = None
-        p_max = 0
+        p_max = -1
         for i in range(len(prior_dist)):
-            text_, decoder_response_ids = self.generate_from_1_doc(
-                args, decoder_input_ids, topk_documents_decoder_text[i], return_ids=True)
+            text_ = self.generate_from_1_doc(
+                args, decoder_input_ids, topk_documents_decoder_text[i])
 
+            decoder_response_ids = self.tokenizer.convert_tokens_to_ids(
+                self.tokenizer.tokenize(text_))
             decoder_input_ids_, decoder_response_ids_, _ = self._prepare_inputs(
                 [decoder_input_ids], [decoder_response_ids], [[topk_documents_decoder_text[i]]], with_eos=False)
-            decoder_loss, _ = self([decoder_input_ids_, decoder_response_ids_])
+
+            decoder_loss, _ = self(
+                [decoder_input_ids_.cuda(), decoder_response_ids_.cuda()])
 
             p_y_given_zx = torch.exp(-decoder_loss).squeeze().cpu().numpy()
             p_y_given_x = p_y_given_zx * prior_dist[i]

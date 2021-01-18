@@ -187,12 +187,19 @@ def main():
     parser.add_argument("--knowledge_file", type=str)
     parser.add_argument("--score_file", type=str)
     parser.add_argument("--add_correct_document", action="store_true")
+    parser.add_argument("--skip_cannot_answer", action="store_true")
+    parser.add_argument("--only_correct_doc", action="store_true")
     args = parser.parse_args()
 
     predictions = json.load(open(args.output_file, "r"))
 
     metrics = Metrics()
     for example in tqdm(predictions):
+        if (args.skip_cannot_answer and example["response"] == "CANNOTANSWER"):
+            continue
+        if (args.only_correct_doc and example["doc_id"] != example["topk_documents_ids"][0]):
+            continue
+
         metrics.update_selection(
             example["topk_documents_ids"], example["doc_id"])
         metrics.update_generation(
@@ -213,6 +220,9 @@ def main():
                 del knowledge[i["id"]]["id"]
 
         for i in range(len(predictions)):
+            if (args.skip_cannot_answer and predictions[i]["response"] == "CANNOTANSWER"):
+                continue
+
             if (predictions[i]["doc_id"] != None):
                 predictions[i]["correct_document"] = knowledge[predictions[i]["doc_id"]]
             else:

@@ -182,7 +182,8 @@ def Evaluate(args, eval_dataset, model):
                 }
 
     if (args.eval_only):
-        write_preds(eval_dataset, args.output_file, d)
+        write_preds(eval_dataset, args.output_file, d,
+                    skip_cannot_answer=args.skip_cannot_answer)
 
     results = metrics.scores()
     return results
@@ -208,6 +209,9 @@ def main():
                         help="Predictions will be written to this file.")
     parser.add_argument("--model_path", type=str,
                         help="Name of the experiment, checkpoints will be stored here")
+    parser.add_argument("--prior_path", type=str)
+    parser.add_argument("--posterior_path", type=str)
+    parser.add_argument("--decoder_path", type=str)
     parser.add_argument(
         "--build_index", action="store_true", help="Build index")
     parser.add_argument("--index_path", type=str, help="Path of the index")

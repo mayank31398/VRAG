@@ -34,10 +34,12 @@ def normalize(text):
     return white_space_fix(remove_articles(remove_punc(lower(text))))
 
 
-def write_preds(eval_dataset, output_file, d):
+def write_preds(eval_dataset, output_file, d, skip_cannot_answer=False):
     l = []
     for example in eval_dataset.prior_dataset.dataset_walker:
         l.append(example)
+        if (skip_cannot_answer and example["response"] == "CANNOTANSWER"):
+            continue
         l[-1].update(d[example["qid"]])
 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -45,17 +47,6 @@ def write_preds(eval_dataset, output_file, d):
 
     with open(output_file, "w") as jsonfile:
         json.dump(l, jsonfile, indent=4)
-
-
-# def write_preds(eval_dataset, output_file, d):
-#     for example in eval_dataset.prior_dataset.dataset_walker:
-#         d[example["qid"]].update(example)
-
-#     os.makedirs(os.path.dirname(output_file), exist_ok=True)
-#     logger.info("Writing predictions to {}".format(output_file))
-
-#     with open(output_file, "w") as jsonfile:
-#         json.dump(d, jsonfile, indent=4)
 
 
 def pad_ids(arrays, padding, max_length=-1):
