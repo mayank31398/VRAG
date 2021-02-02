@@ -116,6 +116,49 @@ def Train(args, train_dataset, eval_dataset, model):
         model.save_model(args, "best")
 
 
+# # NOTE evaluate posterior
+# def Evaluate(args, eval_dataset, model):
+#     eval_sampler = SequentialSampler(eval_dataset)
+#     eval_dataloader = DataLoader(
+#         eval_dataset,
+#         sampler=eval_sampler,
+#         batch_size=1,
+#         collate_fn=eval_dataset.collate_fn
+#     )
+
+#     epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
+#     metrics = Metrics()
+
+#     d = {}
+#     with torch.no_grad():
+#         model.eval()
+
+#         for batch in epoch_iterator:
+#             _, posterior_input_ids, posterior_token_type_ids, decoder_input_ids, _, doc_ids, q_ids, has_cannot_answer = batch
+
+#             posterior_logits, posterior_indices, _ = model.posterior_model(
+#                 [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], args.topk)
+#             posterior_dist = F.softmax(posterior_logits, dim=-1).cpu().tolist()[0]
+#             posterior_indices = posterior_indices.cpu().tolist()
+
+#             decoder_input_ids = decoder_input_ids[0]
+
+#             if (args.n_gpus > 1):
+#                 posterior_topk_documents_ids = model.posterior_model.module.indexed_passages.get_field_by_indices(
+#                     posterior_indices, "id")[0]
+#             else:
+#                 posterior_topk_documents_ids = model.posterior_model.indexed_passages.get_field_by_indices(
+#                     posterior_indices, "id")[0]
+
+#             doc_ids = doc_ids[0]
+#             q_ids = q_ids[0]
+
+#             metrics.update_selection(posterior_topk_documents_ids, doc_ids)
+
+#     results = metrics.scores()
+#     return results
+
+
 def Evaluate(args, eval_dataset, model):
     eval_sampler = SequentialSampler(eval_dataset)
     eval_dataloader = DataLoader(
@@ -189,6 +232,103 @@ def Evaluate(args, eval_dataset, model):
     return results
 
 
+# # Calculate entropy
+# def Evaluate(args, eval_dataset, model):
+#     eval_sampler = SequentialSampler(eval_dataset)
+#     eval_dataloader = DataLoader(
+#         eval_dataset,
+#         sampler=eval_sampler,
+#         batch_size=1,
+#         collate_fn=eval_dataset.collate_fn
+#     )
+
+#     epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
+#     metrics = Metrics()
+
+#     with torch.no_grad():
+#         model.eval()
+
+#         d = []
+#         for doc in tqdm(model.prior_model.indexed_passages.dataset):
+#             d.append(doc["embeddings"])
+#         d = np.array(d)
+
+#         p_z_given_x = []
+#         p_z_given_xy = []
+#         i = 0
+#         for batch in epoch_iterator:
+#             prior_input_ids, posterior_input_ids, posterior_token_type_ids, _, _, _, _, _ = batch
+
+#             _, _, prior_question_embeddings = model.prior_model(
+#                 prior_input_ids.cuda(), 1)
+#             _, _, posterior_question_embeddings = model.posterior_model(
+#                 [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], 1)
+
+#             prior_question_embeddings = prior_question_embeddings.cpu().numpy()
+#             posterior_question_embeddings = posterior_question_embeddings.cpu().numpy()
+            
+#             p_ = prior_question_embeddings @ d.T
+#             p_ = torch.softmax(torch.tensor(p_), dim=-1).numpy()
+#             p_z_given_x.append(p_)
+            
+#             p_ = posterior_question_embeddings @ d.T
+#             p_ = torch.softmax(torch.tensor(p_), dim=-1).numpy()
+#             p_z_given_xy.append(p_)
+#         p_z_given_x = np.concatenate(p_z_given_x)
+#         p_z_given_xy = np.concatenate(p_z_given_xy)
+
+#         h_z_given_x = (-p_z_given_x * np.log(p_z_given_x)).sum(axis=1).mean()
+#         h_z_given_xy = (-p_z_given_xy * np.log(p_z_given_xy)).sum(axis=1).mean()
+
+#         print(h_z_given_x)
+#         print(h_z_given_xy)
+#         exit()
+
+# # No document generation
+# def Evaluate(args, eval_dataset, model):
+#     eval_sampler = SequentialSampler(eval_dataset)
+#     eval_dataloader = DataLoader(
+#         eval_dataset,
+#         sampler=eval_sampler,
+#         batch_size=1,
+#         collate_fn=eval_dataset.collate_fn
+#     )
+
+#     epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
+#     metrics = Metrics()
+
+#     d = {}
+#     with torch.no_grad():
+#         model.eval()
+
+#         for batch in epoch_iterator:
+#             _, _, _, decoder_input_ids, _, _, q_ids, _ = batch
+#             decoder_input_ids = decoder_input_ids[0]
+
+#             q_ids = q_ids[0]
+
+#             if (args.eval_only):
+#                 if (args.n_gpus > 1):
+#                     output_text_from_1_doc = model.decoder_model.module.generate_from_1_doc(
+#                         args, decoder_input_ids, "")
+#                 else:
+#                     output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
+#                         args, decoder_input_ids, "")
+
+#                 d[q_ids] = {
+#                     "prior_dist": [0.2] * 5,
+#                     "topk_documents_ids": [0] * 5,
+#                     "generated_response_from_1_doc": output_text_from_1_doc,
+#                     "generated_response_from_k_docs": output_text_from_1_doc
+#                 }
+
+#     if (args.eval_only):
+#         write_preds(eval_dataset, args.output_file, d,
+#                     skip_cannot_answer=args.skip_cannot_answer)
+
+#     exit()
+
+
 def main():
     parser = argparse.ArgumentParser()
 
@@ -228,6 +368,12 @@ def main():
     parser.add_argument("--skip_cannot_answer",
                         action="store_true", help="skip CANNOTANSWER")
     parser.add_argument("--fix_DPR", action="store_true",
+                        help="fix DPR model weights")
+    parser.add_argument("--fix_prior", action="store_true",
+                        help="fix prior model weights")
+    parser.add_argument("--fix_posterior", action="store_true",
+                        help="fix posterior model weights")
+    parser.add_argument("--fix_decoder", action="store_true",
                         help="fix DPR model weights")
     args = parser.parse_args()
 

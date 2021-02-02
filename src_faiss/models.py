@@ -509,6 +509,8 @@ class DecoderModel(nn.Module):
                 p_max = p_y_given_x
                 output_text = text_
 
+        if (output_text == None):
+            output_text = ""
         return output_text
 
     def save_model(self, args, model_name):
@@ -544,6 +546,9 @@ class UnsupervisedModel(nn.Module):
         if (self.weigh_cannot_answer):
             self.weight = args.weight
         self.fix_DPR = args.fix_DPR
+        self.fix_prior = args.fix_prior
+        self.fix_posterior = args.fix_posterior
+        self.fix_decoder = args.fix_decoder
 
         if (args.n_gpus > 1):
             self.prior_model = nn.DataParallel(self.prior_model)
@@ -783,10 +788,10 @@ class UnsupervisedModel(nn.Module):
 
                 if (self.multitask):
                     decoder_input_ids_, decoder_response_ids_, _, cls_index = self.decoder_model.module._prepare_inputs(
-                        decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+                        decoder_input_ids, decoder_response_ids, prior_sampled_documents_text)
                 else:
                     decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model.module._prepare_inputs(
-                        decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+                        decoder_input_ids, decoder_response_ids, prior_sampled_documents_text)
             else:
                 prior_sampled_documents_text = self.prior_model.indexed_passages.get_field_by_indices(
                     prior_sampled_indices, "text")
@@ -795,10 +800,10 @@ class UnsupervisedModel(nn.Module):
 
                 if (self.multitask):
                     decoder_input_ids_, decoder_response_ids_, _, cls_index = self.decoder_model._prepare_inputs(
-                        decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+                        decoder_input_ids, decoder_response_ids, prior_sampled_documents_text)
                 else:
                     decoder_input_ids_, decoder_response_ids_, _ = self.decoder_model._prepare_inputs(
-                        decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+                        decoder_input_ids, decoder_response_ids, prior_sampled_documents_text)
 
             if (self.multitask):
                 decoder_loss, _, classification_logits = self.decoder_model(
@@ -808,6 +813,8 @@ class UnsupervisedModel(nn.Module):
                     [decoder_input_ids_.cuda(), decoder_response_ids_.cuda()])
 
             loss = decoder_loss + decoder_loss.detach() * torch.log(prior_sampled_dist)
+            if (self.multitask):
+                loss = loss * (1 - has_cannot_answer) + classification_loss
             loss = loss.mean()
 
             print("loss =", loss)
@@ -836,11 +843,13 @@ class UnsupervisedModel(nn.Module):
             self.decoder_model.save_model(args, model_name)
 
     def GetParameters(self):
-        if (self.fix_DPR):
-            return list(self.decoder_model.parameters())
+        prior_params = list(self.prior_model.parameters())
+        posterior_params = list(self.posterior_model.parameters())
+        decoder_params = list(self.decoder_model.parameters())
 
-        params = list(self.prior_model.parameters()) + \
-            list(self.decoder_model.parameters())
-        if (self.modeling_method == "VRAG"):
-            params += list(self.posterior_model.parameters())
-        return params
+        if (self.fix_DPR or (self.fix_prior and self.fix_posterior)):
+            return decoder_params
+        elif (self.fix_posterior and self.fix_decoder):
+            return prior_params
+        elif (not self.fix_prior and not self.fix_posterior and not self.fix_decoder):
+            return prior_params + posterior_params + decoder_params

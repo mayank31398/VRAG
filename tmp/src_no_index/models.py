@@ -401,6 +401,8 @@ class DecoderModel(nn.Module):
                 p_max = p_y_given_x
                 output_text = text_
 
+        if (output_text == None):
+            output_text = ""
         return output_text
 
     def save_model(self, args, model_name):
@@ -428,6 +430,10 @@ class UnsupervisedModel(nn.Module):
         self.prior_model = PriorModel(args)
         self.posterior_model = PosteriorModel(args)
         self.decoder_model = DecoderModel(args)
+        self.fix_DPR = args.fix_DPR
+        self.fix_prior = args.fix_prior
+        self.fix_posterior = args.fix_posterior
+        self.fix_decoder = args.fix_decoder
 
     def forward(self, batch):
         (prior_input_ids,
@@ -534,8 +540,13 @@ class UnsupervisedModel(nn.Module):
         self.decoder_model.save_model(args, model_name)
 
     def GetParameters(self):
-        params = list(self.prior_model.parameters()) + \
-            list(self.decoder_model.parameters())
-        if (self.modeling_method == "VRAG"):
-            params += list(self.posterior_model.parameters())
-        return params
+        prior_params = list(self.prior_model.parameters())
+        posterior_params = list(self.posterior_model.parameters())
+        decoder_params = list(self.decoder_model.parameters())
+
+        if (self.fix_DPR or (self.fix_prior and self.fix_posterior)):
+            return decoder_params
+        elif (self.fix_posterior and self.fix_decoder):
+            return prior_params
+        elif (not self.fix_prior and not self.fix_posterior and not self.fix_decoder):
+            return prior_params + posterior_params + decoder_params

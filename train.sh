@@ -1,32 +1,130 @@
+# NOTE QUAC QA dataset
 # ==============================================================================
-# QUAC
-mkdir -p "logs_quac"
-
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac/RAG-5-err.log" -out "logs_quac/RAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/RAG-5" --index_path "runs_quac"
-
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac/VRAG-5-err.log" -out "logs_quac/VRAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/VRAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/VRAG-5" --index_path "runs_quac"
-
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac/RL-5-err.log" -out "logs_quac/RL-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RL-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/RL-5" --index_path "runs_quac"
+# build index (24 hours)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --knowledge_file "data_quac/rag_format/knowledge.jsonl" --index_path "runs_quac" --build_index
 # ==============================================================================
 
 
 # ==============================================================================
-# QUAC dialog
-mkdir -p "logs_quac_dialog"
-
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac_dialog/RAG-5-err.log" -out "logs_quac_dialog/RAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/RAG-5" --index_path "runs_quac" --dialog
-
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac_dialog/VRAG-5-err.log" -out "logs_quac_dialog/VRAG-5-out.log" python baseline_faiss.py --params_file "configs_faiss/VRAG-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/VRAG-5" --index_path "runs_quac" --dialog
-
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_quac_dialog/RL-5-err.log" -out "logs_quac_dialog/RL-5-out.log" python baseline_faiss.py --params_file "configs_faiss/RL-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/RL-5" --index_path "runs_quac" --dialog
+# DPR baseline (2 days)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/DPR_baseline" --index_path "runs_quac" --fix_DPR --skip_cannot_answer
 # ==============================================================================
 
 
 # ==============================================================================
-# MARCO
-mkdir -p "logs_marco"
+# Vanilla
+# RAG (2 days)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/vanilla/RAG-5" --index_path "runs_quac" --skip_cannot_answer
 
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_marco/RAG-5-err.log" -out "logs_marco/RAG-5-out.log" python baseline_no_index.py --params_file "configs_faiss/RAG-5.json" --dataroot "data_marco/close_format" --model_path "runs_marco/RAG-5"
+# VRAG (2 days)
+python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/vanilla/VRAG-5" --index_path "runs_quac" --skip_cannot_answer
+# ==============================================================================
 
-jbsub -q x86_7d -cores 1x1+1 -require v100 -mem 100G -err "logs_marco/VRAG-5-err.log" -out "logs_marco/VRAG-5-out.log" python baseline_no_index.py --params_file "configs_faiss/VRAG-5.json" --dataroot "data_marco/close_format" --model_path "runs_marco/VRAG-5"
+
+# ==============================================================================
+# Fine tune decoder
+# RAG (2 days)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/fine_tuned/RAG-5" --index_path "runs_quac" --fix_DPR --prior_path "runs_quac/vanilla/RAG-5/prior/best" --posterior_path "runs_quac/vanilla/RAG-5/posterior/best" --decoder_path "runs_quac/vanilla/RAG-5/decoder/best" --skip_cannot_answer
+
+# VRAG (2 days)
+python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/fine_tuned/VRAG-5" --index_path "runs_quac" --fix_DPR --prior_path "runs_quac/vanilla/VRAG-5/prior/best" --posterior_path "runs_quac/vanilla/VRAG-5/posterior/best" --decoder_path "runs_quac/vanilla/VRAG-5/decoder/best" --skip_cannot_answer
+# ==============================================================================
+
+
+# NOTE QUAC dialog dataset
+# ==============================================================================
+# build index (24 hours)
+# already built as part of QUAC QA
+# ==============================================================================
+
+
+# ==============================================================================
+# DPR baseline (2 days)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/DPR_baseline" --index_path "runs_quac" --fix_DPR --skip_cannot_answer --dialog
+# ==============================================================================
+
+
+# ==============================================================================
+# Vanilla
+# RAG (2 days)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/vanilla/RAG-5" --index_path "runs_quac" --skip_cannot_answer --dialog
+
+# VRAG (2 days)
+python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/vanilla/VRAG-5" --index_path "runs_quac" --skip_cannot_answer --dialog
+# ==============================================================================
+
+
+# ==============================================================================
+# Fine tune decoder
+# RAG (2 days)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/fine_tuned/RAG-5" --index_path "runs_quac" --fix_DPR --prior_path "runs_quac_dialog/vanilla/RAG-5/prior/best" --posterior_path "runs_quac_dialog/vanilla/RAG-5/posterior/best" --decoder_path "runs_quac_dialog/vanilla/RAG-5/decoder/best" --skip_cannot_answer --dialog
+
+# VRAG (2 days)
+python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/fine_tuned/VRAG-5" --index_path "runs_quac" --fix_DPR --prior_path "runs_quac_dialog/vanilla/VRAG-5/prior/best" --posterior_path "runs_quac_dialog/vanilla/VRAG-5/posterior/best" --decoder_path "runs_quac_dialog/vanilla/VRAG-5/decoder/best" --skip_cannot_answer --dialog
+# ==============================================================================
+
+
+# NOTE DOQA dataset
+# ==============================================================================
+# build index (1 hour)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-doqa.json" --knowledge_file "data_doqa/rag_format/knowledge.jsonl" --index_path "runs_doqa" --build_index
+# ==============================================================================
+
+
+# ==============================================================================
+# DPR baseline (6 hours)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroot "data_doqa/rag_format" --model_path "runs_doqa/DPR_baseline" --index_path "runs_doqa" --dialog --skip_cannot_answer --fix_DPR
+# ==============================================================================
+
+
+# ==============================================================================
+# Vanilla
+# RAG (6 hours)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-doqa.json" --dataroot "data_doqa/rag_format" --model_path "runs_doqa/vanilla/RAG-5" --index_path "runs_doqa" --dialog --skip_cannot_answer
+
+# VRAG (6 hours)
+python baseline_faiss.py --params_file "configs_faiss/VRAG-5-doqa.json" --dataroot "data_doqa/rag_format" --model_path "runs_doqa/vanilla/VRAG-5" --index_path "runs_doqa" --dialog --skip_cannot_answer
+# ==============================================================================
+
+
+# ==============================================================================
+# Fine tune decoder
+# RAG (6 hours)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroot "data_doqa/rag_format" --model_path "runs_doqa/fine_tuned/RAG-5" --index_path "runs_doqa" --fix_DPR --prior_path "runs_doqa/vanilla/RAG-5/prior/best" --posterior_path "runs_doqa/vanilla/RAG-5/posterior/best" --decoder_path "runs_doqa/vanilla/RAG-5/decoder/best" --skip_cannot_answer --dialog
+
+# VRAG (6 hours)
+python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_doqa/rag_format" --model_path "runs_doqa/fine_tuned/VRAG-5" --index_path "runs_doqa" --fix_DPR --prior_path "runs_doqa/vanilla/VRAG-5/prior/best" --posterior_path "runs_doqa/vanilla/VRAG-5/posterior/best" --decoder_path "runs_doqa/vanilla/VRAG-5/decoder/best" --skip_cannot_answer --dialog
+# ==============================================================================
+
+
+# NOTE DSTC dataset
+# ==============================================================================
+# build index (1 hour)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-dstc.json" --knowledge_file "data_dstc/rag_format/knowledge.jsonl" --index_path "runs_dstc" --build_index
+# ==============================================================================
+
+
+# ==============================================================================
+# DPR baseline (1 day)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-dstc.json" --dataroot "data_dstc/rag_format" --model_path "runs_dstc/DPR_baseline" --index_path "runs_dstc" --dialog --fix_DPR
+# ==============================================================================
+
+
+# ==============================================================================
+# Vanilla
+# RAG (1 day)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-dstc.json" --dataroot "data_dstc/rag_format" --model_path "runs_dstc/vanilla/RAG-5" --index_path "runs_dstc" --dialog
+
+# VRAG (1 day)
+python baseline_faiss.py --params_file "configs_faiss/VRAG-5-dstc.json" --dataroot "data_dstc/rag_format" --model_path "runs_dstc/vanilla/VRAG-5" --index_path "runs_dstc" --dialog
+# ==============================================================================
+
+
+# ==============================================================================
+# Fine tune decoder
+# RAG (1 day)
+python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroot "data_dstc/rag_format" --model_path "runs_dstc/fine_tuned/RAG-5" --index_path "runs_dstc" --fix_DPR --prior_path "runs_dstc/vanilla/RAG-5/prior/best" --posterior_path "runs_dstc/vanilla/RAG-5/posterior/best" --decoder_path "runs_dstc/vanilla/RAG-5/decoder/best" --dialog
+
+# VRAG (1 day)
+python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_dstc/rag_format" --model_path "runs_dstc/fine_tuned/VRAG-5" --index_path "runs_dstc" --fix_DPR --prior_path "runs_dstc/vanilla/VRAG-5/prior/best" --posterior_path "runs_dstc/vanilla/VRAG-5/posterior/best" --decoder_path "runs_dstc/vanilla/VRAG-5/decoder/best" --dialog
 # ==============================================================================

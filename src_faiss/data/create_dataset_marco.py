@@ -8,7 +8,7 @@ import numpy as np
 random.seed(42)
 
 
-def CreateDataset(dataset, docs={}, qid=0):
+def CreateDataset(dataset, docs={}):
     l = []
     doc_id = len(docs)
     qid = 0

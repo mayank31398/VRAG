@@ -1,0 +1,32 @@
+{
+    "document_encoder_model_name": "facebook/dpr-ctx_encoder-multiset-base",
+    "question_encoder_model_name": "facebook/dpr-question_encoder-multiset-base",
+    "decoder_model_name": "gpt2",
+    "modeling_method": "RAG",
+    "gradient_accumulation_steps": 1,
+    "learning_rate": 1e-6,
+    "adam_epsilon": 1e-8,
+    "max_grad_norm": 1,
+    "num_train_epochs": 10,
+    "seed": 2021,
+    "topk": 5,
+    "divide": 5,
+    "batch_size": 1,
+    "warmup_steps": 0,
+    "stopping_criteria": 5,
+    "num_turns": 4,
+    "processing_args": {
+        "batch_size": 8
+    },
+    "index_args": {
+        "dimensions": 768,
+        "links": 128
+    },
+    "generation_args": {
+        "min_length": 1,
+        "max_length": 40,
+        "temperature": 0.7,
+        "top_k": 0,
+        "top_p": 0.9
+    }
+}
