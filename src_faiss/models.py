@@ -661,8 +661,21 @@ class UnsupervisedModel(nn.Module):
             posterior_logits, posterior_indices, posterior_question_embeddings = self.posterior_model(
                 [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], self.topk)
 
-            prior_logits, prior_indices, prior_question_embeddings = self.prior_model(
+            # ==================================================================
+            # old implementation
+            _, prior_indices, prior_question_embeddings = self.prior_model(
                 prior_input_ids.cuda(), self.topk)
+            # ==================================================================
+
+            # # ==================================================================
+            # # new implementation
+            # _, _, prior_question_embeddings = self.prior_model(
+            #     prior_input_ids.cuda(), self.topk)
+
+            # prior_indices = self.prior_model.indexed_passages.retrieve(
+            #     -prior_question_embeddings, self.topk)
+            # prior_indices = torch.tensor(prior_indices)
+            # # ==================================================================
 
             posterior_indices = posterior_indices.cpu().tolist()
             prior_indices = prior_indices.cpu().tolist()
