@@ -201,19 +201,25 @@ def Evaluate(args, eval_dataset, model):
             doc_ids = doc_ids[0]
             q_ids = q_ids[0]
 
-            best_document_text = prior_topk_documents_text[0]
-
             metrics.update_selection(prior_topk_documents_ids, doc_ids)
 
             if (args.eval_only):
+                output_text_from_1_doc = []
+
+                for j in range(len(prior_topk_documents_text)):
+                    document_text = prior_topk_documents_text[j]
+
+                    if (args.n_gpus > 1):
+                        output_text_from_1_doc.append(model.decoder_model.module.generate_from_1_doc(
+                            args, decoder_input_ids, document_text))
+                    else:
+                        output_text_from_1_doc.append(model.decoder_model.generate_from_1_doc(
+                            args, decoder_input_ids, document_text))
+
                 if (args.n_gpus > 1):
-                    output_text_from_1_doc = model.decoder_model.module.generate_from_1_doc(
-                        args, decoder_input_ids, best_document_text)
                     output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
                         args, decoder_input_ids, prior_topk_documents_text, prior_dist)
                 else:
-                    output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
-                        args, decoder_input_ids, best_document_text)
                     output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
                         args, decoder_input_ids, prior_topk_documents_text, prior_dist)
 
@@ -224,9 +230,9 @@ def Evaluate(args, eval_dataset, model):
                     "generated_response_from_k_docs": output_text_from_k_docs
                 }
 
-    if (args.eval_only):
-        write_preds(eval_dataset, args.output_file, d,
-                    skip_cannot_answer=args.skip_cannot_answer)
+        if (args.eval_only):
+            write_preds(eval_dataset, args.output_file, d,
+                        skip_cannot_answer=args.skip_cannot_answer)
 
     results = metrics.scores()
     return results
@@ -266,11 +272,11 @@ def Evaluate(args, eval_dataset, model):
 
 #             prior_question_embeddings = prior_question_embeddings.cpu().numpy()
 #             posterior_question_embeddings = posterior_question_embeddings.cpu().numpy()
-            
+
 #             p_ = prior_question_embeddings @ d.T
 #             p_ = torch.softmax(torch.tensor(p_), dim=-1).numpy()
 #             p_z_given_x.append(p_)
-            
+
 #             p_ = posterior_question_embeddings @ d.T
 #             p_ = torch.softmax(torch.tensor(p_), dim=-1).numpy()
 #             p_z_given_xy.append(p_)
