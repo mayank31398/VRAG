@@ -1,11 +1,14 @@
 .DS_Store
 .vscode
-data_marco
-data_quac
 logs*
 __pycache__
 *.pyc
 src/models_backup.py
 tmp.py
 *.xlsx
+
 data_samples
+data_marco
+data_quac
+data_sharc
+data_doc2dial
