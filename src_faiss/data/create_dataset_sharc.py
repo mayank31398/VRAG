@@ -68,6 +68,45 @@ def CreateKnowledge(docs):
 
     return l
 
+def Split(train, val, docs, n=68):
+    k = []
+    for i in docs:
+        k.append(docs[i])
+
+    random.shuffle(k)
+    k_train = set(k[n:])
+    k_val = set(k[:n])
+
+    train_ = []
+    val_ = []
+    for i in train:
+        if (i["doc_id"] in k_train):
+            train_.append(i)
+        elif (i["doc_id"] in k_val):
+            val_.append(i)
+        else:
+            print("error")
+    for i in val:
+        if (i["doc_id"] in k_train):
+            train_.append(i)
+        elif (i["doc_id"] in k_val):
+            val_.append(i)
+        else:
+            print("error")
+
+    return train_, val_
+
+def Check(train, val):
+    t = []
+    v = []
+    for i in train:
+        t.append(i["doc_id"])
+    for i in val:
+        v.append(i["doc_id"])
+    t = set(t)
+    v = set(v)
+    x = t.intersection(v)
+    assert(len(x) == 0)
 
 def main():
     with open("data_sharc/json/sharc_train.json", "r") as f:
@@ -82,7 +121,14 @@ def main():
 
     train, docs = CreateDataset(train)
     val, docs = CreateDataset(val, docs=docs)
+
+    train, val = Split(train, val, docs)
+
     test, docs = CreateDataset(test, docs=docs)
+
+    Check(train, val)
+    Check(train, test)
+    Check(val, test)
 
     docs = CreateKnowledge(docs)
     random.shuffle(docs)
