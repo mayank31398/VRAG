@@ -30,7 +30,7 @@ def set_seed(args):
     torch.manual_seed(args.seed)
 
 
-def Train(args, train_dataset, eval_dataset, model):
+def Train(args, train_dataset, eval_dataset, test_dataset, model):
     train_sampler = RandomSampler(train_dataset)
     train_dataloader = DataLoader(
         train_dataset,
@@ -54,11 +54,21 @@ def Train(args, train_dataset, eval_dataset, model):
     num_times_best_acc = 0
     best_found = False
 
-    results = Evaluate(args, eval_dataset, model)
+    results_train = Evaluate(args, train_dataset, model)
+    results_val = Evaluate(args, eval_dataset, model)
+    results_test = Evaluate(args, test_dataset, model)
 
-    logger.info("***** Eval results *****")
-    for key in sorted(results.keys()):
-        logger.info("  %s = %s", key, str(results[key]))
+    logger.info("***** train results *****")
+    for key in sorted(results_train.keys()):
+        logger.info("  %s = %s", key, str(results_train[key]))
+
+    logger.info("***** val results *****")
+    for key in sorted(results_val.keys()):
+        logger.info("  %s = %s", key, str(results_val[key]))
+
+    logger.info("***** test results *****")
+    for key in sorted(results_test.keys()):
+        logger.info("  %s = %s", key, str(results_test[key]))
 
     for _ in trange(int(args.num_train_epochs), desc="Epoch"):
         model.train()
@@ -93,16 +103,26 @@ def Train(args, train_dataset, eval_dataset, model):
             if (args.save_every != 0 and global_step % args.save_every == 0):
                 model.save_model(args, "checkpoint-" + str(global_step))
 
-        results = Evaluate(args, eval_dataset, model)
+        results_train = Evaluate(args, train_dataset, model)
+        results_val = Evaluate(args, eval_dataset, model)
+        results_test = Evaluate(args, test_dataset, model)
 
-        logger.info("***** Eval results *****")
-        for key in sorted(results.keys()):
-            logger.info("  %s = %s", key, str(results[key]))
+        logger.info("***** train results *****")
+        for key in sorted(results_train.keys()):
+            logger.info("  %s = %s", key, str(results_train[key]))
 
-        if (results["r@1"] > best_acc):
+        logger.info("***** val results *****")
+        for key in sorted(results_val.keys()):
+            logger.info("  %s = %s", key, str(results_val[key]))
+
+        logger.info("***** test results *****")
+        for key in sorted(results_test.keys()):
+            logger.info("  %s = %s", key, str(results_test[key]))
+
+        if (results_val["r@1"] > best_acc):
             num_times_best_acc = 0
             model.save_model(args, "best")
-            best_acc = results["r@1"]
+            best_acc = results_val["r@1"]
             best_found = True
         else:
             num_times_best_acc += 1
@@ -154,6 +174,37 @@ def Train(args, train_dataset, eval_dataset, model):
 #             q_ids = q_ids[0]
 
 #             metrics.update_selection(posterior_topk_documents_ids, doc_ids)
+
+#             if (args.eval_only):
+#                 output_text_from_1_doc = []
+
+#                 for j in range(len(prior_topk_documents_text)):
+#                     document_text = prior_topk_documents_text[j]
+
+#                     if (args.n_gpus > 1):
+#                         output_text_from_1_doc.append(model.decoder_model.module.generate_from_1_doc(
+#                             args, decoder_input_ids, document_text))
+#                     else:
+#                         output_text_from_1_doc.append(model.decoder_model.generate_from_1_doc(
+#                             args, decoder_input_ids, document_text))
+
+#                 if (args.n_gpus > 1):
+#                     output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
+#                         args, decoder_input_ids, prior_topk_documents_text, prior_dist)
+#                 else:
+#                     output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
+#                         args, decoder_input_ids, prior_topk_documents_text, prior_dist)
+
+#                 d[q_ids] = {
+#                     "posterior_dist": posterior_dist,
+#                     "topk_documents_ids": posterior_topk_documents_ids,
+#                     "generated_response_from_1_doc": output_text_from_1_doc,
+#                     "generated_response_from_k_docs": output_text_from_k_docs
+#                 }
+
+#         if (args.eval_only):
+#             write_preds(eval_dataset, args.output_file, d,
+#                         skip_cannot_answer=args.skip_cannot_answer)
 
 #     results = metrics.scores()
 #     return results
@@ -290,50 +341,6 @@ def Evaluate(args, eval_dataset, model):
 #         print(h_z_given_xy)
 #         exit()
 
-# # No document generation
-# def Evaluate(args, eval_dataset, model):
-#     eval_sampler = SequentialSampler(eval_dataset)
-#     eval_dataloader = DataLoader(
-#         eval_dataset,
-#         sampler=eval_sampler,
-#         batch_size=1,
-#         collate_fn=eval_dataset.collate_fn
-#     )
-
-#     epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
-#     metrics = Metrics()
-
-#     d = {}
-#     with torch.no_grad():
-#         model.eval()
-
-#         for batch in epoch_iterator:
-#             _, _, _, decoder_input_ids, _, _, q_ids, _ = batch
-#             decoder_input_ids = decoder_input_ids[0]
-
-#             q_ids = q_ids[0]
-
-#             if (args.eval_only):
-#                 if (args.n_gpus > 1):
-#                     output_text_from_1_doc = model.decoder_model.module.generate_from_1_doc(
-#                         args, decoder_input_ids, "")
-#                 else:
-#                     output_text_from_1_doc = model.decoder_model.generate_from_1_doc(
-#                         args, decoder_input_ids, "")
-
-#                 d[q_ids] = {
-#                     "prior_dist": [0.2] * 5,
-#                     "topk_documents_ids": [0] * 5,
-#                     "generated_response_from_1_doc": output_text_from_1_doc,
-#                     "generated_response_from_k_docs": output_text_from_1_doc
-#                 }
-
-#     if (args.eval_only):
-#         write_preds(eval_dataset, args.output_file, d,
-#                     skip_cannot_answer=args.skip_cannot_answer)
-
-#     exit()
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -435,9 +442,11 @@ def main():
             args, tokenizers, split="train")
         unsupervised_eval_dataset = UnsupervisedDataset(
             args, tokenizers, split="val")
+        unsupervised_test_dataset = UnsupervisedDataset(
+            args, tokenizers, split="test")
 
-        Train(args, unsupervised_train_dataset,
-              unsupervised_eval_dataset, unsupervised_model)
+        Train(args, unsupervised_train_dataset, unsupervised_eval_dataset,
+              unsupervised_test_dataset, unsupervised_model)
     else:
         unsupervised_eval_dataset = UnsupervisedDataset(
             args, tokenizers, labels_file=args.labels_file)

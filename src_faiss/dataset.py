@@ -189,7 +189,6 @@ class BaseDataset(torch.utils.data.Dataset):
                 "has_cannot_answer": has_cannot_answer
             }
             examples.append(example)
-
         return examples
 
     def __len__(self):

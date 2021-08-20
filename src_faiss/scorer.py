@@ -203,7 +203,7 @@ def main():
         metrics.update_selection(
             example["topk_documents_ids"], example["doc_id"])
         metrics.update_generation(
-            example["response"], example["generated_response_from_1_doc"])
+            example["response"], example["generated_response_from_1_doc"][0])
         metrics.update_generation(
             example["response"], example["generated_response_from_k_docs"], num_docs="k")
     results = metrics.scores()
