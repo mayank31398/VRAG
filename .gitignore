@@ -12,3 +12,8 @@ data_marco
 data_quac
 data_sharc
 data_doc2dial
+data_dstc
+pred_doqa
+pred_dstc
+pred_quac
+pred_quac_dialog

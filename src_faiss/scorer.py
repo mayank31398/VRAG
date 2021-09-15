@@ -94,7 +94,20 @@ class Metrics():
         self._selection_r1.append(recall_1)
         self._selection_rk.append(recall_k)
 
-    def update_generation(self, ref_response, hyp_response, num_docs=1):
+    def update_generation(self, ref_response, hyp_response, num_docs=1, bleu=-1):
+        if (bleu != -1):
+            if (num_docs == 1):
+                self._bleu1_from_1_doc.append(bleu)
+                self._bleu2_from_1_doc.append(bleu)
+                self._bleu3_from_1_doc.append(bleu)
+                self._bleu4_from_1_doc.append(bleu)
+            else:
+                self._bleu1_from_k_docs.append(bleu)
+                self._bleu2_from_k_docs.append(bleu)
+                self._bleu3_from_k_docs.append(bleu)
+                self._bleu4_from_k_docs.append(bleu)
+            return
+
         self._has_generation_scores = True
         ref_tokens = self._normalize_text(ref_response).split()
         hyp_tokens = self._normalize_text(hyp_response).split()
@@ -189,6 +202,7 @@ def main():
     parser.add_argument("--add_correct_document", action="store_true")
     parser.add_argument("--skip_cannot_answer", action="store_true")
     parser.add_argument("--only_correct_doc", action="store_true")
+    parser.add_argument("--penalize", action="store_true")
     args = parser.parse_args()
 
     predictions = json.load(open(args.output_file, "r"))
@@ -202,10 +216,25 @@ def main():
 
         metrics.update_selection(
             example["topk_documents_ids"], example["doc_id"])
-        metrics.update_generation(
-            example["response"], example["generated_response_from_1_doc"][0])
-        metrics.update_generation(
-            example["response"], example["generated_response_from_k_docs"], num_docs="k")
+        
+        if (args.penalize):
+            if (example["doc_id"] == example["topk_documents_ids"][0]):
+                metrics.update_generation(
+                    example["response"], example["generated_response_from_1_doc"][0])
+            else:
+                metrics.update_generation(None, None, bleu=0)
+            
+            if (example["doc_id"] in example["topk_documents_ids"]):
+                metrics.update_generation(
+                    example["response"], example["generated_response_from_k_docs"], num_docs="k")
+            else:
+                metrics.update_generation(None, None, num_docs="k", bleu=0)
+        else:
+            metrics.update_generation(
+                example["response"], example["generated_response_from_1_doc"][0])
+            metrics.update_generation(
+                example["response"], example["generated_response_from_k_docs"], num_docs="k")
+
     results = metrics.scores()
 
     logger.info("***** Results *****")

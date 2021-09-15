@@ -289,6 +289,30 @@ def Evaluate(args, eval_dataset, model):
     return results
 
 
+# def Evaluate(args, eval_dataset, model):
+#     eval_sampler = SequentialSampler(eval_dataset)
+#     eval_dataloader = DataLoader(
+#         eval_dataset,
+#         sampler=eval_sampler,
+#         batch_size=1,
+#         collate_fn=eval_dataset.collate_fn
+#     )
+
+#     epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
+#     with torch.no_grad():
+#         model.eval()
+
+#         l = []
+#         for batch in epoch_iterator:
+#             q = model.ComputeMI(batch)
+#             if (q == None):
+#                 continue
+#             l.append(q)
+#         l = np.array(l)
+#         print(l.mean())
+#         exit()
+
+
 # # Calculate entropy
 # def Evaluate(args, eval_dataset, model):
 #     eval_sampler = SequentialSampler(eval_dataset)

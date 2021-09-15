@@ -2,19 +2,22 @@ import json
 import logging
 import os
 from itertools import chain
-
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchviz import make_dot
 from transformers import (AutoConfig, AutoTokenizer, DPRQuestionEncoder,
                           GPT2LMHeadModel)
-
+import numpy as np
 from .data import pad_ids
 
 logger = logging.getLogger(__name__)
 EPSILON = 1e-10
 
+def ReplaceNAN(x, val=0):
+    x[x != x] = val
+    return x
 
 def GetUnionKL(prior_model_outputs, posterior_model_outputs):
     prior_topk_documents_ids = prior_model_outputs["topk_documents_ids"]
@@ -844,6 +847,65 @@ class UnsupervisedModel(nn.Module):
         print()
 
         return loss
+
+    def ComputeMI(self, batch):
+        (prior_input_ids,
+         _,
+         _,
+         decoder_input_ids,
+         decoder_response_ids,
+         doc_ids,
+         _,
+         _) = batch
+
+        prior_logits, prior_indices, _ = self.prior_model(
+            prior_input_ids.cuda(), self.topk)
+        p_z_given_x = F.softmax(prior_logits, dim=-1) + EPSILON
+
+        prior_indices = prior_indices.cpu().tolist()
+        prior_topk_documents_text = self.prior_model.indexed_passages.get_field_by_indices(
+            prior_indices, "text")
+        prior_topk_documents_ids = self.prior_model.indexed_passages.get_field_by_indices(
+            prior_indices, "id")
+
+        x = self.decoder_model._prepare_inputs(
+            decoder_input_ids, decoder_response_ids, prior_topk_documents_text)
+
+        decoder_input_ids_, decoder_response_ids_, _ = x
+        decoder_loss, _ = self.decoder_model(
+            [decoder_input_ids_.cuda(), decoder_response_ids_.cuda()])
+
+        p_y_given_zx = torch.exp(-decoder_loss) + EPSILON
+        # p_y_given_zx = ReplaceNAN(p_y_given_zx)
+        # print(prior_topk_documents_ids)
+        # print(doc_ids)
+        # print("p(y|zx) =", p_y_given_zx)
+        p_y_given_x = (p_z_given_x * p_y_given_zx).sum(dim=-1) + EPSILON
+
+        prior_best_document_text = self.prior_model.indexed_passages.get_field_by_doc_id(
+            [[_] for _ in doc_ids], "text")
+
+        x = self.decoder_model._prepare_inputs(
+            decoder_input_ids, decoder_response_ids, prior_best_document_text)
+
+        decoder_input_ids_, decoder_response_ids_, _ = x
+        decoder_loss, _ = self.decoder_model(
+            [decoder_input_ids_.cuda(), decoder_response_ids_.cuda()])
+
+        p_y_given_zx = torch.exp(-decoder_loss) + EPSILON
+        # p_y_given_zx = ReplaceNAN(p_y_given_zx)
+
+        l = torch.log(p_y_given_zx / p_y_given_x + EPSILON)
+        l = l.cpu().numpy()
+
+        if (np.isnan(l).any()):
+            return None
+        # print(decoder_loss)
+        # print("z_correct p(y|z_correct x) =", p_y_given_zx)
+        # print("p(y|x) =", p_y_given_x)
+        # print(l)
+        # print()
+        return l
 
     def save_model(self, args, model_name):
         if (self.parallel):

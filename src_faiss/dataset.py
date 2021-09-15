@@ -69,9 +69,12 @@ class KnowledgeWalker:
                 args.index_path, "index.faiss"))
             self.dataset = dataset
             logger.info("Index loaded")
-            self.inds = {}
+
+            self.text_to_inds = {}
+            self.ids_to_inds = {}
             for i, e in tqdm(enumerate(self.dataset)):
-                self.inds[e["text"]] = i
+                self.text_to_inds[e["text"]] = i
+                self.ids_to_inds[e["id"]] = i
 
     def retrieve(self, question_embeddings, topk):
         question_embeddings = question_embeddings.detach().cpu().numpy()
@@ -83,7 +86,7 @@ class KnowledgeWalker:
         for i in range(len(topk_documents_text)):
             indices.append([])
             for j in range(len(topk_documents_text[0])):
-                indices[i].append(self.inds[topk_documents_text[i][j]])
+                indices[i].append(self.text_to_inds[topk_documents_text[i][j]])
 
         return indices
 
@@ -94,6 +97,14 @@ class KnowledgeWalker:
             for j in range(len(indices[0])):
                 results[i].append(self.dataset[indices[i][j]][field])
         return results
+
+    def get_field_by_doc_id(self, doc_ids, field="text"):
+        results = []
+        for i in range(len(doc_ids)):
+            results.append([])
+            for j in range(len(doc_ids[0])):
+                results[i].append(self.ids_to_inds[doc_ids[i][j]])
+        return self.get_field_by_indices(results, field=field)
 
 
 class DatasetWalker:
