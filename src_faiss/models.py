@@ -15,9 +15,11 @@ from .data import pad_ids
 logger = logging.getLogger(__name__)
 EPSILON = 1e-10
 
+
 def ReplaceNAN(x, val=0):
     x[x != x] = val
     return x
+
 
 def GetUnionKL(prior_model_outputs, posterior_model_outputs):
     prior_topk_documents_ids = prior_model_outputs["topk_documents_ids"]
@@ -94,6 +96,32 @@ def GetPostKL(prior_model_outputs, posterior_model_outputs):
     return KL
 
 
+class MagicalModel(nn.Module):
+    def __init__(self, args, indexed_passages):
+        super(MagicalModel, self).__init__()
+        self.max_length = 512
+
+        self.config = AutoConfig.from_pretrained(
+            args.question_encoder_model_name)
+        self.encoder = DPRQuestionEncoder.from_pretrained(
+            args.question_encoder_model_name, config=self.config)
+        logger.info("Loading magical model from %s",
+                    args.question_encoder_model_name)
+
+        self.indexed_passages = indexed_passages
+
+    def forward(self, batch, topk):
+        input_ids, token_type_ids = batch
+
+        # question_embeddings: batch_size x 768
+        question_embeddings = self.encoder(
+            input_ids=input_ids[:, :self.max_length], token_type_ids=token_type_ids[:, :self.max_length]).pooler_output
+        retrieved_indices = self.indexed_passages.retrieve(
+            question_embeddings, topk)
+
+        return torch.tensor(retrieved_indices).cuda()
+
+
 class PriorModel(nn.Module):
     def __init__(self, args, indexed_passages):
         super(PriorModel, self).__init__()
@@ -126,15 +154,21 @@ class PriorModel(nn.Module):
 
         self.indexed_passages = indexed_passages
 
-    def forward(self, batch, topk):
+    def forward(self, batch, topk, magic=0):
         # input_ids: batch_size x sequence_length
-        input_ids = batch
+        if (magic):
+            input_ids, retrieved_indices = batch
+            retrieved_indices = retrieved_indices.cpu().tolist()
+        else:
+            input_ids = batch
 
         # question_embeddings: batch_size x 768
         question_embeddings = self.encoder(
             input_ids=input_ids[:, :self.max_length]).pooler_output
-        retrieved_indices = self.indexed_passages.retrieve(
-            question_embeddings, topk)
+
+        if (not magic):
+            retrieved_indices = self.indexed_passages.retrieve(
+                question_embeddings, topk)
 
         # topk_documents_embeddings: batch_size x topk x 768
         topk_documents_embeddings = self.indexed_passages.get_field_by_indices(
@@ -194,14 +228,19 @@ class PosteriorModel(nn.Module):
 
         self.indexed_passages = indexed_passages
 
-    def forward(self, batch, topk):
-        input_ids, token_type_ids = batch
+    def forward(self, batch, topk, magic=0):
+        if (magic):
+            input_ids, token_type_ids, retrieved_indices = batch
+            retrieved_indices = retrieved_indices.cpu().tolist()
+        else:
+            input_ids, token_type_ids = batch
 
         # question_embeddings: batch_size x 768
         question_embeddings = self.encoder(
             input_ids=input_ids[:, :self.max_length], token_type_ids=token_type_ids[:, :self.max_length]).pooler_output
-        retrieved_indices = self.indexed_passages.retrieve(
-            question_embeddings, topk)
+        if (not magic):
+            retrieved_indices = self.indexed_passages.retrieve(
+                question_embeddings, topk)
 
         # topk_documents_embeddings: batch_size x topk x 768
         topk_documents_embeddings = self.indexed_passages.get_field_by_indices(
@@ -535,7 +574,7 @@ class UnsupervisedModel(nn.Module):
         super(UnsupervisedModel, self).__init__()
 
         self.modeling_method = args.modeling_method
-        if (self.modeling_method == "VRAG"):
+        if (self.modeling_method in ["VRAG", "VRAG_magical"]):
             self.kl_beta = args.kl_beta
         elif (self.modeling_method == "RL"):
             self.num_docs = args.num_docs
@@ -544,6 +583,8 @@ class UnsupervisedModel(nn.Module):
         self.prior_model = PriorModel(args, indexed_passages)
         self.posterior_model = PosteriorModel(args, indexed_passages)
         self.decoder_model = DecoderModel(args)
+        if (self.modeling_method == "VRAG_magical"):
+            self.magical_model = MagicalModel(args, indexed_passages)
         self.multitask = args.multitask
         self.weigh_cannot_answer = args.weigh_cannot_answer
         if (self.weigh_cannot_answer):
@@ -554,6 +595,8 @@ class UnsupervisedModel(nn.Module):
         self.fix_decoder = args.fix_decoder
 
         if (args.n_gpus > 1):
+            if (self.modeling_method == "VRAG_magical"):
+                self.magical_model = nn.DataParallel(self.magical_model)
             self.prior_model = nn.DataParallel(self.prior_model)
             self.posterior_model = nn.DataParallel(self.posterior_model)
             self.decoder_model = nn.DataParallel(self.decoder_model)
@@ -838,6 +881,115 @@ class UnsupervisedModel(nn.Module):
             print("decoder_loss =", decoder_loss.mean())
             print("prior_sampled_dist =", prior_sampled_dist)
             print("prior_sampled_documents_ids =", prior_sampled_documents_ids)
+        elif (self.modeling_method == "VRAG_magical"):
+            magical_indices = self.magical_model(
+                [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], self.topk)
+
+            posterior_logits, posterior_indices, posterior_question_embeddings = self.posterior_model(
+                [posterior_input_ids.cuda(), posterior_token_type_ids.cuda(), magical_indices.cuda()], self.topk, magic=1)
+
+            _, prior_indices, prior_question_embeddings = self.prior_model(
+                [prior_input_ids.cuda(), magical_indices.cuda()], self.topk, magic=1)
+
+            magical_indices = magical_indices.cpu().tolist()
+            posterior_indices = posterior_indices.cpu().tolist()
+            prior_indices = prior_indices.cpu().tolist()
+
+            if (self.parallel):
+                posterior_topk_documents_text = self.posterior_model.module.indexed_passages.get_field_by_indices(
+                    posterior_indices, "text")
+                posterior_topk_documents_ids = self.posterior_model.module.indexed_passages.get_field_by_indices(
+                    posterior_indices, "id")
+                posterior_topk_documents_embeddings = self.posterior_model.module.indexed_passages.get_field_by_indices(
+                    posterior_indices, "embeddings")
+
+                prior_topk_documents_ids = self.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_indices, "id")
+                prior_topk_documents_embeddings = self.prior_model.module.indexed_passages.get_field_by_indices(
+                    prior_indices, "embeddings")
+
+                x = self.decoder_model.module._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
+
+                if (self.multitask):
+                    decoder_input_ids_, decoder_response_ids_, _, cls_index = x
+                else:
+                    decoder_input_ids_, decoder_response_ids_, _ = x
+            else:
+                posterior_topk_documents_text = self.posterior_model.indexed_passages.get_field_by_indices(
+                    posterior_indices, "text")
+                posterior_topk_documents_ids = self.posterior_model.indexed_passages.get_field_by_indices(
+                    posterior_indices, "id")
+                posterior_topk_documents_embeddings = self.posterior_model.indexed_passages.get_field_by_indices(
+                    posterior_indices, "embeddings")
+
+                prior_topk_documents_ids = self.prior_model.indexed_passages.get_field_by_indices(
+                    prior_indices, "id")
+                prior_topk_documents_embeddings = self.prior_model.indexed_passages.get_field_by_indices(
+                    prior_indices, "embeddings")
+
+                x = self.decoder_model._prepare_inputs(
+                    decoder_input_ids, decoder_response_ids, posterior_topk_documents_text)
+
+                if (self.multitask):
+                    decoder_input_ids_, decoder_response_ids_, _, cls_index = x
+                else:
+                    decoder_input_ids_, decoder_response_ids_, _ = x
+
+            if (self.multitask):
+                decoder_loss, _, classification_logits = self.decoder_model(
+                    [decoder_input_ids_.cuda(), decoder_response_ids_.cuda(), cls_index.cuda()])
+
+                b_ = classification_logits.shape[0]
+                k_ = classification_logits.shape[1]
+
+                classification_logits = classification_logits.reshape(b_ * k_)
+
+                has_cannot_answer = has_cannot_answer.cuda()
+                has_cannot_answer_ = has_cannot_answer.repeat(
+                    1, k_).reshape(b_ * k_)
+
+                loss_fct = nn.BCEWithLogitsLoss(reduction="none")
+                classification_loss = loss_fct(
+                    classification_logits, has_cannot_answer_.float()).reshape(b_, k_)
+                classification_loss = classification_loss.mean(dim=-1)
+            else:
+                decoder_loss, _ = self.decoder_model(
+                    [decoder_input_ids_.cuda(), decoder_response_ids_.cuda()])
+
+            posterior_dist = F.softmax(
+                posterior_logits, dim=-1) + EPSILON
+
+            loss = (posterior_dist * decoder_loss).sum(dim=-1)
+
+            if (self.multitask):
+                loss = loss * (1 - has_cannot_answer) + classification_loss
+
+            if (self.weigh_cannot_answer):
+                loss += (1 - has_cannot_answer) * (self.weight - 1) * loss
+
+            loss = loss.mean()
+
+            prior_model_outputs = {
+                "topk_documents_ids": prior_topk_documents_ids,
+                "question_embeddings": prior_question_embeddings,
+                "topk_documents_embeddings": prior_topk_documents_embeddings
+            }
+            posterior_model_outputs = {
+                "topk_documents_ids": posterior_topk_documents_ids,
+                "question_embeddings": posterior_question_embeddings,
+                "topk_documents_embeddings": posterior_topk_documents_embeddings
+            }
+
+            KL = GetUnionKL(prior_model_outputs, posterior_model_outputs)
+            loss += self.kl_beta * KL
+
+            print("loss =", loss)
+            print("KL =", KL)
+            print("decoder_loss =", decoder_loss)
+            print("posterior_dist =", posterior_dist)
+            print("topk_documents_ids =",
+                  posterior_model_outputs["topk_documents_ids"])
 
         print("doc_ids =", doc_ids)
         print("q_ids =", q_ids)

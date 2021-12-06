@@ -227,10 +227,24 @@ def Evaluate(args, eval_dataset, model):
         model.eval()
 
         for batch in epoch_iterator:
-            prior_input_ids, _, _, decoder_input_ids, _, doc_ids, q_ids, has_cannot_answer = batch
+            (prior_input_ids,
+             posterior_input_ids,
+             posterior_token_type_ids,
+             decoder_input_ids,
+             _,
+             doc_ids,
+             q_ids,
+             _) = batch
 
-            prior_logits, prior_indices, _ = model.prior_model(
-                prior_input_ids.cuda(), args.topk)
+            if (args.modeling_method == "VRAG_magical"):
+                magical_indices = model.magical_model(
+                    [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], args.topk)
+                prior_logits, prior_indices, _ = model.prior_model(
+                    [prior_input_ids.cuda(), magical_indices.cuda()], args.topk, magic=1)
+            else:
+                prior_logits, prior_indices, _ = model.prior_model(
+                    prior_input_ids.cuda(), args.topk)
+
             prior_dist = F.softmax(prior_logits, dim=-1).cpu().tolist()[0]
             prior_indices = prior_indices.cpu().tolist()
 
