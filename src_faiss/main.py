@@ -240,7 +240,7 @@ def Evaluate(args, eval_dataset, model):
                 magical_indices = model.magical_model(
                     [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], args.topk)
                 prior_logits, prior_indices, _ = model.prior_model(
-                    [prior_input_ids.cuda(), magical_indices.cuda()], args.topk, magic=1)
+                    batch=[prior_input_ids.cuda(), magical_indices.cuda()], topk=args.topk, magic=1)
             else:
                 prior_logits, prior_indices, _ = model.prior_model(
                     prior_input_ids.cuda(), args.topk)
