@@ -7,12 +7,9 @@ src/models_backup.py
 tmp.py
 *.xlsx
 
-data_samples
-data_marco
 data_quac
-data_sharc
-data_doc2dial
 data_dstc
+data_doqa
 pred_doqa
 pred_dstc
 pred_quac
