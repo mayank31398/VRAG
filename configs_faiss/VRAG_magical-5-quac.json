@@ -4,7 +4,7 @@
     "decoder_model_name": "gpt2",
     "modeling_method": "VRAG_magical",
     "gradient_accumulation_steps": 1,
-    "learning_rate": 1e-5,
+    "learning_rate": 1e-6,
     "adam_epsilon": 1e-8,
     "max_grad_norm": 1,
     "num_train_epochs": 10,

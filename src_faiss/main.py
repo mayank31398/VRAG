@@ -81,7 +81,7 @@ def Train(args, train_dataset, eval_dataset, test_dataset, model):
             global_step += 1
 
             # with torch.autograd.detect_anomaly():
-            loss = model(batch)
+            loss = model(batch=batch)
             if (torch.isnan(loss).sum() >= 1):
                 skip_counter += 1
                 print("skipped =", skip_counter)
@@ -166,45 +166,51 @@ def Train(args, train_dataset, eval_dataset, test_dataset, model):
 #             if (args.n_gpus > 1):
 #                 posterior_topk_documents_ids = model.posterior_model.module.indexed_passages.get_field_by_indices(
 #                     posterior_indices, "id")[0]
+
+#                 # posterior_topk_documents_text = model.posterior_model.module.indexed_passages.get_field_by_indices(
+#                 #     posterior_indices, "text")[0]
 #             else:
 #                 posterior_topk_documents_ids = model.posterior_model.indexed_passages.get_field_by_indices(
 #                     posterior_indices, "id")[0]
+
+#                 # posterior_topk_documents_text = model.posterior_model.indexed_passages.get_field_by_indices(
+#                 #     posterior_indices, "text")[0]
 
 #             doc_ids = doc_ids[0]
 #             q_ids = q_ids[0]
 
 #             metrics.update_selection(posterior_topk_documents_ids, doc_ids)
 
-#             if (args.eval_only):
-#                 output_text_from_1_doc = []
+#         #     if (args.eval_only):
+#         #         output_text_from_1_doc = []
 
-#                 for j in range(len(prior_topk_documents_text)):
-#                     document_text = prior_topk_documents_text[j]
+#         #         for j in range(len(posterior_topk_documents_text)):
+#         #             document_text = posterior_topk_documents_text[j]
 
-#                     if (args.n_gpus > 1):
-#                         output_text_from_1_doc.append(model.decoder_model.module.generate_from_1_doc(
-#                             args, decoder_input_ids, document_text))
-#                     else:
-#                         output_text_from_1_doc.append(model.decoder_model.generate_from_1_doc(
-#                             args, decoder_input_ids, document_text))
+#         #             if (args.n_gpus > 1):
+#         #                 output_text_from_1_doc.append(model.decoder_model.module.generate_from_1_doc(
+#         #                     args, decoder_input_ids, document_text))
+#         #             else:
+#         #                 output_text_from_1_doc.append(model.decoder_model.generate_from_1_doc(
+#         #                     args, decoder_input_ids, document_text))
 
-#                 if (args.n_gpus > 1):
-#                     output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
-#                         args, decoder_input_ids, prior_topk_documents_text, prior_dist)
-#                 else:
-#                     output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
-#                         args, decoder_input_ids, prior_topk_documents_text, prior_dist)
+#         #         if (args.n_gpus > 1):
+#         #             output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
+#         #                 args, decoder_input_ids, posterior_topk_documents_text, posterior_dist)
+#         #         else:
+#         #             output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
+#         #                 args, decoder_input_ids, posterior_topk_documents_text, posterior_dist)
 
-#                 d[q_ids] = {
-#                     "posterior_dist": posterior_dist,
-#                     "topk_documents_ids": posterior_topk_documents_ids,
-#                     "generated_response_from_1_doc": output_text_from_1_doc,
-#                     "generated_response_from_k_docs": output_text_from_k_docs
-#                 }
+#         #         d[q_ids] = {
+#         #             "posterior_dist": posterior_dist,
+#         #             "topk_documents_ids": posterior_topk_documents_ids,
+#         #             "generated_response_from_1_doc": output_text_from_1_doc,
+#         #             "generated_response_from_k_docs": output_text_from_k_docs
+#         #         }
 
-#         if (args.eval_only):
-#             write_preds(eval_dataset, args.output_file, d,
-#                         skip_cannot_answer=args.skip_cannot_answer)
+#         # if (args.eval_only):
+#         #     write_preds(eval_dataset, args.output_file, d,
+#         #                 skip_cannot_answer=args.skip_cannot_answer)
 
 #     results = metrics.scores()
 #     return results
@@ -228,22 +234,16 @@ def Evaluate(args, eval_dataset, model):
 
         for batch in epoch_iterator:
             (prior_input_ids,
-             posterior_input_ids,
-             posterior_token_type_ids,
+             _,
+             _,
              decoder_input_ids,
              _,
              doc_ids,
              q_ids,
              _) = batch
 
-            if (args.modeling_method == "VRAG_magical"):
-                magical_indices = model.magical_model(
-                    [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], args.topk)
-                prior_logits, prior_indices, _ = model.prior_model(
-                    batch=[prior_input_ids.cuda(), magical_indices.cuda()], topk=args.topk, magic=1)
-            else:
-                prior_logits, prior_indices, _ = model.prior_model(
-                    prior_input_ids.cuda(), args.topk)
+            prior_logits, prior_indices, _ = model.prior_model(
+                prior_input_ids.cuda(), args.topk)
 
             prior_dist = F.softmax(prior_logits, dim=-1).cpu().tolist()[0]
             prior_indices = prior_indices.cpu().tolist()
