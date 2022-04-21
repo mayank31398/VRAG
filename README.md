@@ -1,3 +1,5 @@
+This repository contains code for the paper [Variational Learning for Unsupervised Knowledge Grounded Dialogs](https://arxiv.org/abs/2112.00653).
+
 #### Flags used to run the code:
 1. `--params_file` Path to params file
 1. `--eval_only` If passed, models only generate responses (no training is done)
@@ -22,4 +24,5 @@
 1. `--fix_posterior` Fix only posterior during training
 1. `--fix_decoder` Fix only decoder during training
 
-Look at [train.sh](train.sh) and [val.sh](val.sh) for how to train and evaluate the models.
+run prepare_data.sh to uncompress the data.
+Look at [train.sh](train.sh) and [val.sh](val.sh) for how to train and evaluate the models respectively.
