@@ -1,15 +1,16 @@
 import json
 import logging
 import os
-import sys
 from functools import partial
 
 import faiss
-import numpy as np
 import torch
+import transformers
 from datasets import Features, Sequence, Value, load_dataset, load_from_disk
 from tqdm import tqdm
 from transformers import DPRContextEncoder, DPRContextEncoderTokenizer
+
+transformers.logging.set_verbosity_error()
 
 from .data import pad_ids
 

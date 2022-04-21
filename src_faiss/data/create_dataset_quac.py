@@ -17,10 +17,9 @@ def GetDialog(history, question):
     return l
 
 
-def CreateDataset(dataset, docs={}):
+def CreateDataset(dataset, docs={}, qid=0):
     l = []
     doc_id = len(docs)
-    qid = 0
 
     for example in dataset:
         evidences = example["evidences"]

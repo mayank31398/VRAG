@@ -2,13 +2,10 @@ import argparse
 import json
 import logging
 import re
-import sys
 
 import jsonlines
 import numpy as np
 from nltk.translate.bleu_score import sentence_bleu
-from nltk.translate.meteor_score import single_meteor_score
-from rouge import Rouge
 from sklearn.metrics import (accuracy_score, f1_score, precision_score,
                              recall_score)
 from tqdm import tqdm

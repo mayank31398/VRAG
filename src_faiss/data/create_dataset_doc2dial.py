@@ -4,7 +4,6 @@ import os
 import random
 
 import jsonlines
-import numpy as np
 
 random.seed(42)
 

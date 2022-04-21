@@ -1,11 +1,8 @@
-import copy
 import json
 import os
 import random
 
 import jsonlines
-import numpy as np
-from tqdm import tqdm
 
 random.seed(42)
 

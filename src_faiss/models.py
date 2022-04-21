@@ -2,11 +2,9 @@ import json
 import logging
 import os
 from itertools import chain
-import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchviz import make_dot
 from transformers import (AutoConfig, AutoTokenizer, DPRQuestionEncoder,
                           GPT2LMHeadModel)
 import numpy as np
@@ -884,6 +882,7 @@ class UnsupervisedModel(nn.Module):
         elif (self.modeling_method == "VRAG_magical"):
             magical_indices = self.magical_model(
                 [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], self.topk)
+            magical_indices = magical_indices.cpu()
 
             posterior_logits, posterior_indices, posterior_question_embeddings = self.posterior_model(
                 [posterior_input_ids.cuda(), posterior_token_type_ids.cuda(), magical_indices.cuda()], self.topk, magic=1)
@@ -891,7 +890,6 @@ class UnsupervisedModel(nn.Module):
             _, prior_indices, prior_question_embeddings = self.prior_model(
                 [prior_input_ids.cuda(), magical_indices.cuda()], self.topk, magic=1)
 
-            magical_indices = magical_indices.cpu().tolist()
             posterior_indices = posterior_indices.cpu().tolist()
             prior_indices = prior_indices.cpu().tolist()
 

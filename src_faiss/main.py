@@ -1,5 +1,4 @@
 import argparse
-import copy
 import json
 import logging
 import os
@@ -8,17 +7,14 @@ from argparse import Namespace
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
-from torchviz import make_dot
 from tqdm import tqdm, trange
 from transformers import AdamW, get_linear_schedule_with_warmup
 
 from .data import write_preds
-from .dataset import (DecoderDataset, KnowledgeWalker, PosteriorDataset,
-                      PriorDataset, UnsupervisedDataset)
-from .models import DecoderModel, PosteriorModel, PriorModel, UnsupervisedModel
+from .dataset import KnowledgeWalker, UnsupervisedDataset
+from .models import UnsupervisedModel
 from .scorer import Metrics
 
 logger = logging.getLogger(__name__)
@@ -136,86 +132,6 @@ def Train(args, train_dataset, eval_dataset, test_dataset, model):
         model.save_model(args, "best")
 
 
-# # NOTE evaluate posterior
-# def Evaluate(args, eval_dataset, model):
-#     eval_sampler = SequentialSampler(eval_dataset)
-#     eval_dataloader = DataLoader(
-#         eval_dataset,
-#         sampler=eval_sampler,
-#         batch_size=1,
-#         collate_fn=eval_dataset.collate_fn
-#     )
-
-#     epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
-#     metrics = Metrics()
-
-#     d = {}
-#     with torch.no_grad():
-#         model.eval()
-
-#         for batch in epoch_iterator:
-#             _, posterior_input_ids, posterior_token_type_ids, decoder_input_ids, _, doc_ids, q_ids, has_cannot_answer = batch
-
-#             posterior_logits, posterior_indices, _ = model.posterior_model(
-#                 [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], args.topk)
-#             posterior_dist = F.softmax(posterior_logits, dim=-1).cpu().tolist()[0]
-#             posterior_indices = posterior_indices.cpu().tolist()
-
-#             decoder_input_ids = decoder_input_ids[0]
-
-#             if (args.n_gpus > 1):
-#                 posterior_topk_documents_ids = model.posterior_model.module.indexed_passages.get_field_by_indices(
-#                     posterior_indices, "id")[0]
-
-#                 # posterior_topk_documents_text = model.posterior_model.module.indexed_passages.get_field_by_indices(
-#                 #     posterior_indices, "text")[0]
-#             else:
-#                 posterior_topk_documents_ids = model.posterior_model.indexed_passages.get_field_by_indices(
-#                     posterior_indices, "id")[0]
-
-#                 # posterior_topk_documents_text = model.posterior_model.indexed_passages.get_field_by_indices(
-#                 #     posterior_indices, "text")[0]
-
-#             doc_ids = doc_ids[0]
-#             q_ids = q_ids[0]
-
-#             metrics.update_selection(posterior_topk_documents_ids, doc_ids)
-
-#         #     if (args.eval_only):
-#         #         output_text_from_1_doc = []
-
-#         #         for j in range(len(posterior_topk_documents_text)):
-#         #             document_text = posterior_topk_documents_text[j]
-
-#         #             if (args.n_gpus > 1):
-#         #                 output_text_from_1_doc.append(model.decoder_model.module.generate_from_1_doc(
-#         #                     args, decoder_input_ids, document_text))
-#         #             else:
-#         #                 output_text_from_1_doc.append(model.decoder_model.generate_from_1_doc(
-#         #                     args, decoder_input_ids, document_text))
-
-#         #         if (args.n_gpus > 1):
-#         #             output_text_from_k_docs = model.decoder_model.module.generate_from_k_docs(
-#         #                 args, decoder_input_ids, posterior_topk_documents_text, posterior_dist)
-#         #         else:
-#         #             output_text_from_k_docs = model.decoder_model.generate_from_k_docs(
-#         #                 args, decoder_input_ids, posterior_topk_documents_text, posterior_dist)
-
-#         #         d[q_ids] = {
-#         #             "posterior_dist": posterior_dist,
-#         #             "topk_documents_ids": posterior_topk_documents_ids,
-#         #             "generated_response_from_1_doc": output_text_from_1_doc,
-#         #             "generated_response_from_k_docs": output_text_from_k_docs
-#         #         }
-
-#         # if (args.eval_only):
-#         #     write_preds(eval_dataset, args.output_file, d,
-#         #                 skip_cannot_answer=args.skip_cannot_answer)
-
-#     results = metrics.scores()
-#     return results
-
-
 def Evaluate(args, eval_dataset, model):
     eval_sampler = SequentialSampler(eval_dataset)
     eval_dataloader = DataLoader(
@@ -301,83 +217,6 @@ def Evaluate(args, eval_dataset, model):
 
     results = metrics.scores()
     return results
-
-
-# def Evaluate(args, eval_dataset, model):
-#     eval_sampler = SequentialSampler(eval_dataset)
-#     eval_dataloader = DataLoader(
-#         eval_dataset,
-#         sampler=eval_sampler,
-#         batch_size=1,
-#         collate_fn=eval_dataset.collate_fn
-#     )
-
-#     epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
-#     with torch.no_grad():
-#         model.eval()
-
-#         l = []
-#         for batch in epoch_iterator:
-#             q = model.ComputeMI(batch)
-#             if (q == None):
-#                 continue
-#             l.append(q)
-#         l = np.array(l)
-#         print(l.mean())
-#         exit()
-
-
-# # Calculate entropy
-# def Evaluate(args, eval_dataset, model):
-#     eval_sampler = SequentialSampler(eval_dataset)
-#     eval_dataloader = DataLoader(
-#         eval_dataset,
-#         sampler=eval_sampler,
-#         batch_size=1,
-#         collate_fn=eval_dataset.collate_fn
-#     )
-
-#     epoch_iterator = tqdm(eval_dataloader, desc="Iteration")
-#     metrics = Metrics()
-
-#     with torch.no_grad():
-#         model.eval()
-
-#         d = []
-#         for doc in tqdm(model.prior_model.indexed_passages.dataset):
-#             d.append(doc["embeddings"])
-#         d = np.array(d)
-
-#         p_z_given_x = []
-#         p_z_given_xy = []
-#         i = 0
-#         for batch in epoch_iterator:
-#             prior_input_ids, posterior_input_ids, posterior_token_type_ids, _, _, _, _, _ = batch
-
-#             _, _, prior_question_embeddings = model.prior_model(
-#                 prior_input_ids.cuda(), 1)
-#             _, _, posterior_question_embeddings = model.posterior_model(
-#                 [posterior_input_ids.cuda(), posterior_token_type_ids.cuda()], 1)
-
-#             prior_question_embeddings = prior_question_embeddings.cpu().numpy()
-#             posterior_question_embeddings = posterior_question_embeddings.cpu().numpy()
-
-#             p_ = prior_question_embeddings @ d.T
-#             p_ = torch.softmax(torch.tensor(p_), dim=-1).numpy()
-#             p_z_given_x.append(p_)
-
-#             p_ = posterior_question_embeddings @ d.T
-#             p_ = torch.softmax(torch.tensor(p_), dim=-1).numpy()
-#             p_z_given_xy.append(p_)
-#         p_z_given_x = np.concatenate(p_z_given_x)
-#         p_z_given_xy = np.concatenate(p_z_given_xy)
-
-#         h_z_given_x = (-p_z_given_x * np.log(p_z_given_x)).sum(axis=1).mean()
-#         h_z_given_xy = (-p_z_given_xy * np.log(p_z_given_xy)).sum(axis=1).mean()
-
-#         print(h_z_given_x)
-#         print(h_z_given_xy)
-#         exit()
 
 
 def main():
