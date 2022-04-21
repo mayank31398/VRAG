@@ -31,6 +31,9 @@ python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroo
 
 # VRAG (2 days)
 python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/fine_tuned/VRAG-5" --index_path "runs_quac" --fix_DPR --prior_path "runs_quac/vanilla/VRAG-5/prior/best" --posterior_path "runs_quac/vanilla/VRAG-5/posterior/best" --decoder_path "runs_quac/vanilla/VRAG-5/decoder/best" --skip_cannot_answer
+
+# VRAG_magical (2 days)
+python baseline_faiss.py --params_file "configs_faiss/VRAG_magical-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac/fine_tuned/VRAG_magical-5" --index_path "runs_quac" --fix_DPR --prior_path "runs_quac/vanilla/VRAG_magical-5/prior/best" --posterior_path "runs_quac/vanilla/VRAG_magical-5/posterior/best" --decoder_path "runs_quac/vanilla/VRAG_magical-5/decoder/best" --skip_cannot_answer
 # ==============================================================================
 
 
@@ -67,6 +70,9 @@ python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroo
 
 # VRAG (2 days)
 python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/fine_tuned/VRAG-5" --index_path "runs_quac" --fix_DPR --prior_path "runs_quac_dialog/vanilla/VRAG-5/prior/best" --posterior_path "runs_quac_dialog/vanilla/VRAG-5/posterior/best" --decoder_path "runs_quac_dialog/vanilla/VRAG-5/decoder/best" --skip_cannot_answer --dialog
+
+# VRAG_magical (2 days)
+python baseline_faiss.py --params_file "configs_faiss/VRAG_magical-5.json" --dataroot "data_quac/rag_format" --model_path "runs_quac_dialog/fine_tuned/VRAG_magical-5" --index_path "runs_quac" --fix_DPR --prior_path "runs_quac_dialog/vanilla/VRAG_magical-5/prior/best" --posterior_path "runs_quac_dialog/vanilla/VRAG_magical-5/posterior/best" --decoder_path "runs_quac_dialog/vanilla/VRAG_magical-5/decoder/best" --skip_cannot_answer --dialog
 # ==============================================================================
 
 
@@ -103,6 +109,9 @@ python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroo
 
 # VRAG (6 hours)
 python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_doqa/rag_format" --model_path "runs_doqa/fine_tuned/VRAG-5" --index_path "runs_doqa" --fix_DPR --prior_path "runs_doqa/vanilla/VRAG-5/prior/best" --posterior_path "runs_doqa/vanilla/VRAG-5/posterior/best" --decoder_path "runs_doqa/vanilla/VRAG-5/decoder/best" --skip_cannot_answer --dialog
+
+# VRAG_magical (2 days)
+python baseline_faiss.py --params_file "configs_faiss/VRAG_magical-5-quac.json" --dataroot "data_doqa/rag_format" --model_path "runs_doqa/fine_tuned/VRAG_magical-5" --index_path "runs_doqa" --fix_DPR --prior_path "runs_doqa/vanilla/VRAG_magical-5/prior/best" --posterior_path "runs_doqa/vanilla/VRAG_magical-5/posterior/best" --decoder_path "runs_doqa/vanilla/VRAG_magical-5/decoder/best" --skip_cannot_answer --dialog
 # ==============================================================================
 
 
@@ -139,4 +148,7 @@ python baseline_faiss.py --params_file "configs_faiss/RAG-5-quac.json" --dataroo
 
 # VRAG (1 day)
 python baseline_faiss.py --params_file "configs_faiss/VRAG-5-quac.json" --dataroot "data_dstc/rag_format" --model_path "runs_dstc/fine_tuned/VRAG-5" --index_path "runs_dstc" --fix_DPR --prior_path "runs_dstc/vanilla/VRAG-5/prior/best" --posterior_path "runs_dstc/vanilla/VRAG-5/posterior/best" --decoder_path "runs_dstc/vanilla/VRAG-5/decoder/best" --dialog
+
+# VRAG_magical (2 days)
+python baseline_faiss.py --params_file "configs_faiss/VRAG_magical-5-quac.json" --dataroot "data_dstc/rag_format" --model_path "runs_dstc/fine_tuned/VRAG_magical-5" --index_path "runs_dstc" --fix_DPR --prior_path "runs_dstc/vanilla/VRAG_magical-5/prior/best" --posterior_path "runs_dstc/vanilla/VRAG_magical-5/posterior/best" --decoder_path "runs_dstc/vanilla/VRAG_magical-5/decoder/best" --skip_cannot_answer --dialog
 # ==============================================================================
